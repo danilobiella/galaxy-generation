@@ -3,43 +3,98 @@ import jax
 import jax.numpy as jnp
 
 
+class GenResBlock(hk.Module):
+    """Upsampling Residual Block for the Generator."""
+
+    def __init__(self, out_channels, stride=2, name=None):
+        super().__init__(name=name)
+        self.out_channels = out_channels
+        self.stride = stride
+
+    def __call__(self, x, is_training):
+        in_channels = x.shape[-1]
+
+        # --- Main Path ---
+        # 1. Upsample convolution
+        h = hk.Conv2DTranspose(
+            self.out_channels, kernel_shape=4, stride=self.stride, padding="SAME"
+        )(x)
+        h = hk.BatchNorm(True, True, 0.9)(h, is_training)
+        h = jax.nn.relu(h)
+
+        # 2. Refinement convolution (stride 1)
+        h = hk.Conv2D(self.out_channels, kernel_shape=3, stride=1, padding="SAME")(h)
+        h = hk.BatchNorm(True, True, 0.9)(h, is_training)
+
+        # --- Shortcut Path ---
+        # We must project the shortcut to match the new resolution and channel depth
+        shortcut = hk.Conv2DTranspose(
+            self.out_channels, kernel_shape=1, stride=self.stride, padding="SAME"
+        )(x)
+
+        return jax.nn.relu(h + shortcut)
+
+
+class DisResBlock(hk.Module):
+    """Downsampling Residual Block for the Discriminator."""
+
+    def __init__(self, out_channels, stride=2, name=None):
+        super().__init__(name=name)
+        self.out_channels = out_channels
+        self.stride = stride
+
+    def __call__(self, x, is_training):
+        in_channels = x.shape[-1]
+
+        # --- Main Path ---
+        h = hk.Conv2D(
+            self.out_channels, kernel_shape=4, stride=self.stride, padding="SAME"
+        )(x)
+        h = hk.BatchNorm(True, True, 0.9)(h, is_training)
+        h = jax.nn.leaky_relu(h, negative_slope=0.2)
+
+        h = hk.Conv2D(self.out_channels, kernel_shape=3, stride=1, padding="SAME")(h)
+        h = hk.BatchNorm(True, True, 0.9)(h, is_training)
+
+        # --- Shortcut Path ---
+        shortcut = hk.Conv2D(
+            self.out_channels, kernel_shape=1, stride=self.stride, padding="SAME"
+        )(x)
+
+        return jax.nn.leaky_relu(h + shortcut, negative_slope=0.2)
+
+
 class Generator(hk.Module):
     def __call__(self, z, is_training: bool):
-        """z: Latent vector [batch, 100]"""
-        # 1. Project and reshape to 4x4
-        x = hk.Linear(4 * 4 * 256, w_init=hk.initializers.RandomNormal(0.02))(z)
+        # 1. Initial Projection: Project to 4x4 with 512 channels
+        x = hk.Linear(4 * 4 * 256)(z)
         x = jnp.reshape(x, [-1, 4, 4, 256])
 
-        # 2. Upsampling blocks: 4->8->16->32->64->128->256
-        configs = [(128, 2), (64, 2), (32, 2), (16, 2), (8, 2), (3, 2)]
-        for i, (channels, stride) in enumerate(configs):
-            is_last = i == len(configs) - 1
-            x = hk.Conv2DTranspose(
-                output_channels=channels,
-                kernel_shape=4,
-                stride=stride,
-                padding="SAME",
-                w_init=hk.initializers.RandomNormal(0.02),
-            )(x)
+        # 2. Upsampling Chain: 4 -> 8 -> 16 -> 32 -> 64 -> 128 -> 256
+        # Channel strategy: Start wide (512), slowly narrow down to RGB (3)
+        x = GenResBlock(128)(x, is_training)  # 8x8
+        x = GenResBlock(64)(x, is_training)  # 16x16
+        x = GenResBlock(32)(x, is_training)  # 32x32
+        x = GenResBlock(32)(x, is_training)  # 64x64
+        x = GenResBlock(32)(x, is_training)  # 128x128
 
-            if not is_last:
-                x = hk.BatchNorm(True, True, 0.9)(x, is_training)
-                x = jax.nn.relu(x)
-            else:
-                x = jax.nn.tanh(x)  # Output pixels in [-1, 1]
-        return x
+        # Final layer: Get to 256x256 and 3 channels
+        x = hk.Conv2DTranspose(3, kernel_shape=4, stride=2, padding="SAME")(x)
+        return jax.nn.tanh(x)
 
 
 class Discriminator(hk.Module):
     def __call__(self, x, is_training: bool):
-        for channels in [8, 16, 32, 64, 128, 256]:
-            x = hk.Conv2D(channels, kernel_shape=4, stride=2, padding="SAME")(x)
-            x = hk.BatchNorm(True, True, 0.9)(x, is_training)
-            x = jax.nn.leaky_relu(x, negative_slope=0.2)
+        # Downsampling Chain: 256 -> 128 -> 64 -> 32 -> 16 -> 8 -> 4
+        x = DisResBlock(32)(x, is_training)  # 128
+        x = DisResBlock(32)(x, is_training)  # 64
+        x = DisResBlock(32)(x, is_training)  # 32
+        x = DisResBlock(64)(x, is_training)  # 16
+        x = DisResBlock(128)(x, is_training)  # 8
+        x = DisResBlock(256)(x, is_training)  # 4
 
         x = hk.Flatten()(x)
-        logits = hk.Linear(1)(x)
-        return logits
+        return hk.Linear(1)(x)
 
 
 def build_network() -> tuple[hk.TransformedWithState, hk.TransformedWithState]:
@@ -49,7 +104,4 @@ def build_network() -> tuple[hk.TransformedWithState, hk.TransformedWithState]:
     def dis(x, is_training: bool = True):
         return Discriminator()(x, is_training)
 
-    gen_fn = hk.transform_with_state(gen)
-    dis_fn = hk.transform_with_state(dis)
-
-    return gen_fn, dis_fn
+    return hk.transform_with_state(gen), hk.transform_with_state(dis)

@@ -14,7 +14,6 @@ class GalaxyLMDBDataSource(grain.RandomAccessDataSource):
     indices: np.ndarray
 
     def __post_init__(self):
-        # We open briefly in the main process just to grab the metadata
         env = lmdb.open(self.db_path, readonly=True, lock=False)
         with env.begin() as txn:
             meta_bytes = txn.get(b"__metadata__")
@@ -28,7 +27,6 @@ class GalaxyLMDBDataSource(grain.RandomAccessDataSource):
         return len(self.indices)
 
     def _get_env(self):
-        # Each Grain worker needs its own LMDB environment handle
         if self._env is None:
             self._env = lmdb.open(
                 self.db_path, readonly=True, lock=False, readahead=False, meminit=False
@@ -55,7 +53,7 @@ def process(features):
 
 #
 def make_data_loaders(
-    db_path: str, batch_size: int, val_split: float = 0.1, seed: int = 42
+    db_path: str, batch_size: int, seed: int = 42
 ) -> Tuple[grain.DataLoader, grain.DataLoader]:
     # 1. Peek at the metadata once to get total count
     temp_env = lmdb.open(db_path, readonly=True, lock=False)
@@ -64,22 +62,12 @@ def make_data_loaders(
         total_samples = meta["num_samples"]
     temp_env.close()
 
-    # 2. Split indices
     indices = np.arange(total_samples)
-    rng = np.random.default_rng(seed)
-    rng.shuffle(indices)
 
-    split_idx = int(total_samples * (1 - val_split))
-    train_indices = indices[:split_idx]
-    val_indices = indices[split_idx:]
-
-    def make_loader(idx_set):
-        source = GalaxyLMDBDataSource(db_path, idx_set)
-        return (
-            grain.MapDataset.source(source)
-            .shuffle(seed=seed)
-            .map(process)
-            .batch(batch_size=batch_size, drop_remainder=True)
-        )
-
-    return make_loader(train_indices), make_loader(val_indices)
+    source = GalaxyLMDBDataSource(db_path, indices)
+    return (
+        grain.MapDataset.source(source)
+        .shuffle(seed=seed)
+        .map(process)
+        .batch(batch_size=batch_size, drop_remainder=True)
+    )

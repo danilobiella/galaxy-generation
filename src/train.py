@@ -37,7 +37,7 @@ def make_model_fns(
 
     Returns:
         init_model_state: initialize params + nn_state
-        eval_step: run evaluation on a batch
+        gen_fn: generate and save images from the current generator state
     """
 
     def init_model_state(
@@ -54,26 +54,6 @@ def make_model_fns(
             dis_params=dis_params,
             dis_nn_state=dis_nn_state,
         )
-
-    @jax.jit
-    def eval_step(
-        model_state: ModelState,
-        x: jnp.ndarray,
-        y: jnp.ndarray,
-    ) -> dict[str, jnp.ndarray]:
-        # logits, _ = net.apply(
-        #     model_state.params,
-        #     model_state.nn_state,
-        #     None,
-        #     x,
-        #     is_training=False,
-        # )
-        # y_int = y.astype(jnp.int32)
-        # loss = _cross_entropy(logits, y_int)
-        # acc = _accuracy(logits, y_int)
-        # return {"loss": loss, "accuracy": acc, "logits": logits}
-        # TODO
-        return {"": jnp.ones(10)}
 
     def generate_and_save_images(
         key: jax.Array,
@@ -116,7 +96,7 @@ def make_model_fns(
 
         print(f"Saved 16 generated images to: {filepath}")
 
-    return init_model_state, eval_step, generate_and_save_images
+    return init_model_state, generate_and_save_images
 
 
 def make_train_fns(
@@ -408,7 +388,6 @@ def fit_model(
     gen_fn,
     schedule,
     train_ds,
-    val_ds,
     n_epochs: int = 20,
     n_gen_steps: int = 10,
     n_dis_steps: int = 10,
@@ -423,9 +402,7 @@ def fit_model(
     }
 
     console.print(
-        f"[bold blue]Training setup[/bold blue]  "
-        f"train_batches={len(train_ds)}  "
-        f"val_batches={len(val_ds)}  "
+        f"[bold blue]Training setup[/bold blue]  train_batches={len(train_ds)}  "
     )
 
     key, gen_key = jax.random.split(key)
@@ -445,6 +422,7 @@ def fit_model(
             console=console,
         )
 
+        # Generate and save sample images at the end of each epoch
         os.makedirs("figures", exist_ok=True)
         gen_fn(
             key=gen_key,
@@ -452,19 +430,10 @@ def fit_model(
             filepath=f"figures/epoch_{epoch}_samples.png",
         )
 
-        # val_metrics = evaluate_dataset(
-        #     model_state=train_state.model_state,
-        #     eval_step=eval_step,
-        #     data_loader=val_ds,
-        # )
-
         lr = float(schedule(int(train_state.step)))
 
         history["gen_train_loss"].append(train_metrics["gen_loss"])
         history["dis_train_loss"].append(train_metrics["dis_loss"])
-        # history["val_loss"].append(val_metrics["loss"])
-        # history["val_accuracy"].append(val_metrics["accuracy"])
-        # history["val_top5_accuracy"].append(val_metrics["top5_accuracy"])
         history["lr"].append(lr)
 
         console.print(

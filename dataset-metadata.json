@@ -1,0 +1,14 @@
+{
+  "title": "galaxy10_DECals", 
+  "subtitle": "galaxy10-DECals-dataset",
+  "description": "The galaxy10_DECals dataset is a collection of images of galaxies, categorized into 10 different classes based on their morphological features. This dataset is derived from the DECaLS survey and is used for training and evaluating machine learning models in the field of astronomy.",
+  "id": "danilob/galaxy10-DECaLS",
+  "licenses": [{"name": "CC0-1.0"}],
+  "keywords": [
+    "astronomy",
+	"galaxies",
+	"image classification",
+	"machine learning",
+	"DECaLS survey"
+  ]
+}
