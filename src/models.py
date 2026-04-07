@@ -65,35 +65,54 @@ class DisResBlock(hk.Module):
 
 
 class Generator(hk.Module):
-    def __call__(self, z, is_training: bool):
+    def __call__(self, input, is_training: bool):
         # 1. Initial Projection: Project to 4x4 with 512 channels
-        x = hk.Linear(4 * 4 * 256)(z)
-        x = jnp.reshape(x, [-1, 4, 4, 256])
+        z, c = input
+
+        # Combine latent vector and class embedding
+        c = c.reshape(-1, 1)  # (B, 1)
+        x = jnp.concatenate([z, c], axis=-1)
+
+        x = hk.Linear(4 * 4 * 512)(x)
+        x = jnp.reshape(x, [-1, 4, 4, 512])
 
         # 2. Upsampling Chain: 4 -> 8 -> 16 -> 32 -> 64 -> 128 -> 256
         # Channel strategy: Start wide (512), slowly narrow down to RGB (3)
-        x = GenResBlock(128)(x, is_training)  # 8x8
-        x = GenResBlock(64)(x, is_training)  # 16x16
-        x = GenResBlock(32)(x, is_training)  # 32x32
-        x = GenResBlock(32)(x, is_training)  # 64x64
+        x = GenResBlock(512)(x, is_training)  # 8x8
+        x = GenResBlock(256)(x, is_training)  # 16x16
+        x = GenResBlock(128)(x, is_training)  # 32x32
+        x = GenResBlock(64)(x, is_training)  # 64x64
         x = GenResBlock(32)(x, is_training)  # 128x128
 
         # Final layer: Get to 256x256 and 3 channels
         x = hk.Conv2DTranspose(3, kernel_shape=4, stride=2, padding="SAME")(x)
+
         return jax.nn.tanh(x)
 
 
 class Discriminator(hk.Module):
-    def __call__(self, x, is_training: bool):
+    def __call__(self, input, is_training: bool):
+        x, c = input
+
+        # Embed class label and concatenate to image
+        x_shape = x.shape
+        c_image = (
+            c.reshape(-1, 1)
+            .repeat(x_shape[1] * x_shape[2], axis=1)
+            .reshape(x_shape[0], x_shape[1], x_shape[2], -1)
+        )
+        x = jnp.concatenate([x, c_image], axis=-1)
+
         # Downsampling Chain: 256 -> 128 -> 64 -> 32 -> 16 -> 8 -> 4
         x = DisResBlock(32)(x, is_training)  # 128
-        x = DisResBlock(32)(x, is_training)  # 64
-        x = DisResBlock(32)(x, is_training)  # 32
-        x = DisResBlock(64)(x, is_training)  # 16
-        x = DisResBlock(128)(x, is_training)  # 8
-        x = DisResBlock(256)(x, is_training)  # 4
+        x = DisResBlock(64)(x, is_training)  # 64
+        x = DisResBlock(128)(x, is_training)  # 32
+        x = DisResBlock(256)(x, is_training)  # 16
+        x = DisResBlock(512)(x, is_training)  # 8
+        x = DisResBlock(512)(x, is_training)  # 4
 
         x = hk.Flatten()(x)
+
         return hk.Linear(1)(x)
 
 

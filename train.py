@@ -17,8 +17,8 @@ SEED = 42
 DATA_PATH = "data/galaxy10_decals_lmdb"
 IMAGE_SIZE = (256, 256)
 LATENT_DIM = 128
-N_GEN_STEPS = 10
-N_DIS_STEPS = 10
+N_GEN_STEPS = 1
+N_DIS_STEPS = 1
 
 KAGGLE_DATA_PATH = "/kaggle/input/galaxy10-DECaLS"
 LOCAL_DATA_PATH = "data/galaxy10_decals_lmdb"
@@ -51,17 +51,19 @@ print(f"Number of training samples: {len(train_data_loader) * BATCH_SIZE}")
 gen, dis = build_network()
 print("built network")
 
+input = (jnp.zeros((BATCH_SIZE, 256, 256, 3)), jnp.zeros((BATCH_SIZE,)))
 print("Discriminator architecture:")
 print(
     hk.experimental.tabulate(
         dis, columns=["module", "input", "output", "params_size", "params_bytes"]
-    )(jnp.zeros((BATCH_SIZE, IMAGE_SIZE[0], IMAGE_SIZE[1], 3)))
+    )(input)
 )
+input = (jnp.zeros((BATCH_SIZE, LATENT_DIM)), jnp.zeros((BATCH_SIZE,)))
 print("\nGenerator architecture:")
 print(
     hk.experimental.tabulate(
         gen, columns=["module", "input", "output", "params_size", "params_bytes"]
-    )(jnp.zeros((BATCH_SIZE, LATENT_DIM)))
+    )(input)
 )
 
 
@@ -74,26 +76,23 @@ print("built optimizer and schedule")
 
 # %%
 
-init_model_state, generate_fn = make_model_fns(gen, dis, latent_dim=LATENT_DIM)
+example_batch = next(iter(train_data_loader))
+image_shape = example_batch[0].shape
+
+init_model_state, generate_fn = make_model_fns(
+    gen, dis, latent_dim=LATENT_DIM, image_shape=image_shape[1:]
+)
 init_train_state, gen_train_step, dis_train_step = make_train_fns(
     gen, dis, optimizer, latent_dim=LATENT_DIM
 )
 
-example_batch = next(iter(train_data_loader))
-input_shape = example_batch["image"].shape
-
-model_state = init_model_state(
-    rng=jax.random.PRNGKey(SEED),
-    image_shape=input_shape[1:],
-)
-
+model_state = init_model_state(rng=jax.random.PRNGKey(SEED))
 train_state = init_train_state(model_state)
 print("Initialized model and training state")
 
 # key = jax.random.PRNGKey(SEED)
 # gen_train_step(key, train_state, 16)
-#
-# dis_train_step(key, train_state, example_batch["image"])
+# dis_train_step(key, train_state, example_batch)
 
 # %% -- train --------------------------------------------------------------
 

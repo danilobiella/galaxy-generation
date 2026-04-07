@@ -47,8 +47,8 @@ class GalaxyLMDBDataSource(grain.RandomAccessDataSource):
 def process(features):
     img = features["image"].astype(np.float32) / 255.0
     features["image"] = (img * 2.0) - 1.0
-    features["label"] = np.int32(features["label"])
-    return features
+    features["label"] = (np.int32(features["label"]) - 5.0) / 5.0
+    return (features["image"], features["label"])
 
 
 #

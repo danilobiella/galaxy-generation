@@ -1,7 +1,7 @@
 import os
 import time
 from functools import partial
-from typing import NamedTuple
+from typing import NamedTuple, Tuple
 
 import haiku as hk
 import jax
@@ -29,8 +29,25 @@ class TrainState(NamedTuple):
     step: jnp.ndarray
 
 
+IDX_TO_CLASS = {
+    0: "Disturbed Galaxies",
+    1: "Merging Galaxies",
+    2: "Round Smooth\nGalaxies",
+    3: "In-between Round\nSmooth Galaxies",
+    4: "Cigar Shaped\nSmooth Galaxies",
+    5: "Barred Spiral\nGalaxies",
+    6: "Unbarred Tight\nSpiral Galaxies",
+    7: "Unbarred Loose\nSpiral Galaxies",
+    8: "Edge-on Galaxies\nwithout Bulge",
+    9: "Edge-on Galaxies\nwith Bulge",
+}
+
+
 def make_model_fns(
-    gen: hk.TransformedWithState, dis: hk.TransformedWithState, latent_dim: int = 128
+    gen: hk.TransformedWithState,
+    dis: hk.TransformedWithState,
+    latent_dim: int = 128,
+    image_shape: tuple[int, int, int] = (256, 256, 3),
 ):
     """
     Model-only API.
@@ -42,12 +59,14 @@ def make_model_fns(
 
     def init_model_state(
         rng: jax.Array,
-        image_shape: tuple[int, int, int],
     ) -> ModelState:
         dummy_image = jnp.zeros((1, *image_shape))  # [1, H, W, C]
         dummy_z = jnp.zeros((1, latent_dim))  # [1, latent_dim]
-        dis_params, dis_nn_state = dis.init(rng, dummy_image, is_training=True)
-        gen_params, gen_nn_state = gen.init(rng, dummy_z, is_training=True)
+        dummy_label = jnp.zeros((1,), dtype=jnp.int32)  # [1] class label
+        dummy_image_input = (dummy_image, dummy_label)
+        dummy_gen_input = (dummy_z, dummy_label)
+        dis_params, dis_nn_state = dis.init(rng, dummy_image_input, is_training=True)
+        gen_params, gen_nn_state = gen.init(rng, dummy_gen_input, is_training=True)
         return ModelState(
             gen_params=gen_params,
             gen_nn_state=gen_nn_state,
@@ -61,40 +80,52 @@ def make_model_fns(
         filepath: str = "generated_images.png",
     ):
         """
-        Generates a 4x4 grid of images using the current generator state
-        and saves the plot to a PNG file.
+        Generates a 5x10 grid: 10 columns (classes) and 5 rows (samples per class).
         """
-        # 1. Generate 16 latent vectors [16, latent_dim]
-        z_key, _ = jax.random.split(key)
-        z = jax.random.normal(z_key, (16, latent_dim))
+        n_rows = 5
+        n_cols = 10
+
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(20, 12))
+        plt.subplots_adjust(wspace=0.1, hspace=0.3)
 
         @jax.jit
-        def _generate(params, state, z):
-            images, _ = gen.apply(params, state, None, z, is_training=False)
+        def _generate(params, state, input):
+            images, _ = gen.apply(params, state, None, input, is_training=False)
             return images
 
-        generated_images = _generate(
-            model_state.gen_params, model_state.gen_nn_state, z
-        )
-        generated_images = (generated_images + 1.0) / 2.0
-        images_np = jax.device_get(generated_images)
+        for class_idx in range(n_cols):
+            c_val = (class_idx - 5.0) / 5.0
 
-        fig, axes = plt.subplots(4, 4, figsize=(10, 10))
-        plt.subplots_adjust(wspace=0.1, hspace=0.1)
+            key, col_key = jax.random.split(key)
+            z = jax.random.normal(col_key, (n_rows, 128))
+            input = (z, jnp.full((n_rows,), c_val))
 
-        for i in range(16):
-            ax = axes[i // 4, i % 4]
-            img = images_np[i]
-            if img.shape[-1] == 1:
-                ax.imshow(img.squeeze(), cmap="gray")
-            else:
-                ax.imshow(img)
+            generated_images = _generate(
+                model_state.gen_params, model_state.gen_nn_state, input
+            )
 
-            ax.axis("off")
+            generated_images = (generated_images + 1.0) / 2.0
+            images_np = jax.device_get(generated_images)
+
+            class_name = IDX_TO_CLASS.get(class_idx, f"Class {class_idx}")
+            axes[0, class_idx].set_title(class_name, fontsize=10, fontweight="bold")
+
+            for row_idx in range(n_rows):
+                ax = axes[row_idx, class_idx]
+                img = images_np[row_idx]
+
+                if img.shape[-1] == 1:
+                    ax.imshow(img.squeeze(), cmap="gray")
+                else:
+                    ax.imshow(img)
+
+                ax.axis("off")
+
+        plt.tight_layout()
         plt.savefig(filepath, bbox_inches="tight", pad_inches=0.1)
         plt.close(fig)
 
-        print(f"Saved 16 generated images to: {filepath}")
+        print(f"Generated samples saved to: {filepath}")
 
     return init_model_state, generate_and_save_images
 
@@ -130,19 +161,24 @@ def make_train_fns(
         batch_size: int,
     ) -> tuple[TrainState, dict[str, jnp.ndarray]]:
         def gen_loss(gen_params, dis_params, key):
+            z_key, c_key = jax.random.split(key)
             z = jax.random.normal(key, (batch_size, latent_dim))
+            c = jax.random.randint(c_key, (batch_size,), 0, 10)
+            c = (c - 5.0) / 5.0
+            gen_input = (z, c)
             gen_images, new_gen_nn_state = gen.apply(
                 gen_params,
                 state.model_state.gen_nn_state,
                 None,
-                z,
+                gen_input,
                 is_training=True,
             )
+            dis_input = (gen_images, c)
             logits, _ = dis.apply(
                 dis_params,
                 state.model_state.dis_nn_state,
                 None,
-                gen_images,
+                dis_input,
                 is_training=True,
             )
             loss = jnp.mean(jax.nn.softplus(-logits))
@@ -179,29 +215,34 @@ def make_train_fns(
     def dis_train_step(
         key: jax.Array,
         state: TrainState,
-        images: jnp.ndarray,
+        real_input: Tuple[jnp.ndarray, jnp.ndarray],
     ) -> tuple[TrainState, dict[str, jnp.ndarray]]:
         def dis_loss(gen_params, disc_params, key):
-            z = jax.random.normal(key, (images.shape[0], latent_dim))
+            key_z, key_c = jax.random.split(key)
+            z = jax.random.normal(key, (real_input[0].shape[0], latent_dim))
+            c = jax.random.randint(key_c, (real_input[1].shape[0],), 0, 10)
+            c = (c - 5.0) / 5.0
+            gen_input = (z, c)
             gen_images, _ = gen.apply(
                 gen_params,
                 state.model_state.gen_nn_state,
                 None,
-                z,
+                gen_input,
                 is_training=True,
             )
             real_logits, new_nn_state = dis.apply(
                 disc_params,
                 state.model_state.dis_nn_state,
                 None,
-                images,
+                real_input,
                 is_training=True,
             )
+            disc_input = (gen_images, c)
             fake_logits, new_nn_state = dis.apply(
                 disc_params,
                 new_nn_state,
                 None,
-                gen_images,
+                disc_input,
                 is_training=True,
             )
 
@@ -347,7 +388,7 @@ def train_epoch(
 
             st = time.time()
             key, step_key = jax.random.split(key)
-            train_state, metrics = dis_step(step_key, train_state, batch["image"])
+            train_state, metrics = dis_step(step_key, train_state, batch)
             train_batch_time.append(time.time() - st)
 
             dis_batch_loss = float(metrics["dis_loss"])
@@ -357,7 +398,7 @@ def train_epoch(
                 for _ in range(n_gen_steps):
                     key, step_key = jax.random.split(key)
                     train_state, metrics = gen_step(
-                        step_key, train_state, batch["image"].shape[0]
+                        step_key, train_state, batch[0].shape[0]
                     )
                     gen_batch_loss = float(metrics["gen_loss"])
                     gen_losses.append(gen_batch_loss)
