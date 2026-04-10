@@ -7,7 +7,7 @@ from typing import Iterable
 
 ROOT = Path(__file__).resolve().parent
 SRC_ROOT = ROOT / "src"
-ENTRYPOINT = ROOT / "train.py"
+ENTRYPOINT = ROOT / "main.py"
 OUTPUT = ROOT / ".kaggle_push" / "script.py"
 
 KAGGLE_PIP_DEPS = ["dm-haiku", "lmdb"]

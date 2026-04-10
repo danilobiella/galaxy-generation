@@ -67,11 +67,9 @@ class DisResBlock(hk.Module):
 class Generator(hk.Module):
     def __call__(self, input, is_training: bool):
         # 1. Initial Projection: Project to 4x4 with 512 channels
-        z, c = input
-
-        # Combine latent vector and class embedding
-        c = c.reshape(-1, 1)  # (B, 1)
-        x = jnp.concatenate([z, c], axis=-1)
+        z, c = input  # c are raw integers (0-9)
+        c_onehot = jax.nn.one_hot(c, 10)
+        x = jnp.concatenate([z, c_onehot], axis=-1)
 
         x = hk.Linear(4 * 4 * 512)(x)
         x = jnp.reshape(x, [-1, 4, 4, 512])
@@ -94,14 +92,14 @@ class Discriminator(hk.Module):
     def __call__(self, input, is_training: bool):
         x, c = input
 
-        # Embed class label and concatenate to image
-        x_shape = x.shape
-        c_image = (
-            c.reshape(-1, 1)
-            .repeat(x_shape[1] * x_shape[2], axis=1)
-            .reshape(x_shape[0], x_shape[1], x_shape[2], -1)
+        c_onehot = jax.nn.one_hot(c, 10)  # [B, 10]
+        # Tile it: [B, 10] -> [B, 1, 1, 10] -> [B, 256, 256, 10]
+        c_spatial = jnp.tile(
+            c_onehot[:, jnp.newaxis, jnp.newaxis, :], (1, x.shape[1], x.shape[2], 1)
         )
-        x = jnp.concatenate([x, c_image], axis=-1)
+
+        # 2. Concatenate: RGB (3) + One-Hot (10) = 13 channels
+        x = jnp.concatenate([x, c_spatial], axis=-1)
 
         # Downsampling Chain: 256 -> 128 -> 64 -> 32 -> 16 -> 8 -> 4
         x = DisResBlock(32)(x, is_training)  # 128

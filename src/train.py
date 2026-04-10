@@ -94,11 +94,9 @@ def make_model_fns(
             return images
 
         for class_idx in range(n_cols):
-            c_val = (class_idx - 5.0) / 5.0
-
             key, col_key = jax.random.split(key)
             z = jax.random.normal(col_key, (n_rows, 128))
-            input = (z, jnp.full((n_rows,), c_val))
+            input = (z, jnp.full((n_rows,), class_idx))
 
             generated_images = _generate(
                 model_state.gen_params, model_state.gen_nn_state, input
@@ -162,10 +160,10 @@ def make_train_fns(
     ) -> tuple[TrainState, dict[str, jnp.ndarray]]:
         def gen_loss(gen_params, dis_params, key):
             z_key, c_key = jax.random.split(key)
-            z = jax.random.normal(key, (batch_size, latent_dim))
+            z = jax.random.normal(z_key, (batch_size, latent_dim))
             c = jax.random.randint(c_key, (batch_size,), 0, 10)
-            c = (c - 5.0) / 5.0
             gen_input = (z, c)
+
             gen_images, new_gen_nn_state = gen.apply(
                 gen_params,
                 state.model_state.gen_nn_state,
@@ -221,7 +219,6 @@ def make_train_fns(
             key_z, key_c = jax.random.split(key)
             z = jax.random.normal(key, (real_input[0].shape[0], latent_dim))
             c = jax.random.randint(key_c, (real_input[1].shape[0],), 0, 10)
-            c = (c - 5.0) / 5.0
             gen_input = (z, c)
             gen_images, _ = gen.apply(
                 gen_params,
@@ -237,16 +234,17 @@ def make_train_fns(
                 real_input,
                 is_training=True,
             )
-            disc_input = (gen_images, c)
+            fake_input = (gen_images, c)
             fake_logits, new_nn_state = dis.apply(
                 disc_params,
                 new_nn_state,
                 None,
-                disc_input,
+                fake_input,
                 is_training=True,
             )
-
-            real_loss = jax.nn.softplus(-real_logits)
+            real_loss = 0.9 * jax.nn.softplus(-real_logits) + 0.1 * jax.nn.softplus(
+                real_logits
+            )
             fake_loss = jax.nn.softplus(fake_logits)
             loss = jnp.mean(real_loss + fake_loss)
 
@@ -315,18 +313,6 @@ def evaluate_dataset(model_state, eval_step, data_loader, progress_bar=False):
         "accuracy": total_correct / total_samples,
         "top5_accuracy": total_top5 / total_samples,
     }
-
-
-# --- Example Usage ---
-# To integrate this into your existing loop (e.g., at the end of fit_model):
-#
-# generate_and_save_images(
-#     key=key,                   # Pass current JAX random key
-#     gen=gen,                   # The hk.TransformedWithState generator object
-#     model_state=train_state.model_state, # Current parameters and NN state
-#     latent_dim=LATENT_DIM,      # e.g., 10 or 128
-#     filepath=f"epoch_{epoch}_samples.png"
-# )
 
 
 def train_epoch(

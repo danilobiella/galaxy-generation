@@ -1,3 +1,4 @@
+import math
 import pickle
 from pathlib import Path
 
@@ -11,8 +12,8 @@ from src.data_loader import make_data_loaders
 from src.models import build_network
 from src.train import fit_model, make_model_fns, make_train_fns
 
-BATCH_SIZE = 16
-N_EPOCHS = 50
+BATCH_SIZE = 64
+N_EPOCHS = 10
 SEED = 42
 DATA_PATH = "data/galaxy10_decals_lmdb"
 IMAGE_SIZE = (256, 256)
@@ -114,10 +115,13 @@ state, history = fit_model(
 plt.figure(figsize=(8, 4))
 plt.plot(history["gen_train_loss"], label="gen_train_loss")
 plt.plot(history["dis_train_loss"], label="dis_train_loss")
+plt.axhline(
+    math.log(2), color="red", linestyle="--", label="confused discriminator"
+)
 plt.legend()
 plt.xlabel("epoch")
 plt.ylabel("loss")
-plt.show()
+plt.savefig("loss_plot.png")
 
 # # %% save network state and history
 
