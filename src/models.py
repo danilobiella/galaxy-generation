@@ -12,22 +12,17 @@ class GenResBlock(hk.Module):
         self.stride = stride
 
     def __call__(self, x, is_training):
-        in_channels = x.shape[-1]
-
         # --- Main Path ---
-        # 1. Upsample convolution
         h = hk.Conv2DTranspose(
             self.out_channels, kernel_shape=4, stride=self.stride, padding="SAME"
         )(x)
-        h = hk.BatchNorm(True, True, 0.9)(h, is_training)
+        h = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)(h)
         h = jax.nn.relu(h)
 
-        # 2. Refinement convolution (stride 1)
         h = hk.Conv2D(self.out_channels, kernel_shape=3, stride=1, padding="SAME")(h)
-        h = hk.BatchNorm(True, True, 0.9)(h, is_training)
+        h = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)(h)
 
         # --- Shortcut Path ---
-        # We must project the shortcut to match the new resolution and channel depth
         shortcut = hk.Conv2DTranspose(
             self.out_channels, kernel_shape=1, stride=self.stride, padding="SAME"
         )(x)
@@ -36,7 +31,7 @@ class GenResBlock(hk.Module):
 
 
 class DisResBlock(hk.Module):
-    """Downsampling Residual Block for the Discriminator."""
+    """Downsampling Residual Block for the Discriminator (Critic)."""
 
     def __init__(self, out_channels, stride=2, name=None):
         super().__init__(name=name)
@@ -44,17 +39,16 @@ class DisResBlock(hk.Module):
         self.stride = stride
 
     def __call__(self, x, is_training):
-        in_channels = x.shape[-1]
-
         # --- Main Path ---
         h = hk.Conv2D(
             self.out_channels, kernel_shape=4, stride=self.stride, padding="SAME"
         )(x)
-        h = hk.BatchNorm(True, True, 0.9)(h, is_training)
+
+        h = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)(h)
         h = jax.nn.leaky_relu(h, negative_slope=0.2)
 
         h = hk.Conv2D(self.out_channels, kernel_shape=3, stride=1, padding="SAME")(h)
-        h = hk.BatchNorm(True, True, 0.9)(h, is_training)
+        h = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)(h)
 
         # --- Shortcut Path ---
         shortcut = hk.Conv2D(
@@ -66,23 +60,20 @@ class DisResBlock(hk.Module):
 
 class Generator(hk.Module):
     def __call__(self, input, is_training: bool):
-        # 1. Initial Projection: Project to 4x4 with 512 channels
-        z, c = input  # c are raw integers (0-9)
+        z, c = input
         c_onehot = jax.nn.one_hot(c, 10)
         x = jnp.concatenate([z, c_onehot], axis=-1)
 
         x = hk.Linear(4 * 4 * 512)(x)
         x = jnp.reshape(x, [-1, 4, 4, 512])
 
-        # 2. Upsampling Chain: 4 -> 8 -> 16 -> 32 -> 64 -> 128 -> 256
-        # Channel strategy: Start wide (512), slowly narrow down to RGB (3)
+        # Upsampling Chain: 4 -> 8 -> 16 -> 32 -> 64 -> 128 -> 256
         x = GenResBlock(512)(x, is_training)  # 8x8
         x = GenResBlock(256)(x, is_training)  # 16x16
         x = GenResBlock(128)(x, is_training)  # 32x32
         x = GenResBlock(64)(x, is_training)  # 64x64
         x = GenResBlock(32)(x, is_training)  # 128x128
 
-        # Final layer: Get to 256x256 and 3 channels
         x = hk.Conv2DTranspose(3, kernel_shape=4, stride=2, padding="SAME")(x)
 
         return jax.nn.tanh(x)
@@ -92,33 +83,31 @@ class Discriminator(hk.Module):
     def __call__(self, input, is_training: bool):
         x, c = input
 
-        c_onehot = jax.nn.one_hot(c, 10)  # [B, 10]
-        # Tile it: [B, 10] -> [B, 1, 1, 10] -> [B, 256, 256, 10]
-        c_spatial = jnp.tile(
-            c_onehot[:, jnp.newaxis, jnp.newaxis, :], (1, x.shape[1], x.shape[2], 1)
-        )
+        x = DisResBlock(32)(x, is_training)
+        x = DisResBlock(64)(x, is_training)
+        x = DisResBlock(128)(x, is_training)
+        x = DisResBlock(256)(x, is_training)  # Spatial is now 16x16
 
-        # 2. Concatenate: RGB (3) + One-Hot (10) = 13 channels
+        c_onehot = jax.nn.one_hot(c, 10)
+        c_spatial = c_onehot[..., jnp.newaxis, jnp.newaxis, :]
+
+        target_shape = x.shape[:-1] + (10,)
+        c_spatial = jnp.broadcast_to(c_spatial, target_shape)
+
         x = jnp.concatenate([x, c_spatial], axis=-1)
 
-        # Downsampling Chain: 256 -> 128 -> 64 -> 32 -> 16 -> 8 -> 4
-        x = DisResBlock(32)(x, is_training)  # 128
-        x = DisResBlock(64)(x, is_training)  # 64
-        x = DisResBlock(128)(x, is_training)  # 32
-        x = DisResBlock(256)(x, is_training)  # 16
-        x = DisResBlock(512)(x, is_training)  # 8
-        x = DisResBlock(512)(x, is_training)  # 4
+        x = DisResBlock(512)(x, is_training)
+        x = DisResBlock(512)(x, is_training)
 
         x = hk.Flatten()(x)
-
         return hk.Linear(1)(x)
 
 
-def build_network() -> tuple[hk.TransformedWithState, hk.TransformedWithState]:
+def build_network() -> tuple[hk.Transformed, hk.Transformed]:
     def gen(z, is_training: bool = True):
         return Generator()(z, is_training)
 
     def dis(x, is_training: bool = True):
         return Discriminator()(x, is_training)
 
-    return hk.transform_with_state(gen), hk.transform_with_state(dis)
+    return hk.transform(gen), hk.transform(dis)

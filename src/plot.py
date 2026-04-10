@@ -6,21 +6,15 @@ import matplotlib.pyplot as plt
 def plot_loss(history: dict):
     plt.figure(figsize=(8, 4))
 
-    plt.plot(history["dis_loss"], label="dis_loss", color="darkorange", lw=1)
+    plt.plot(history["dis_loss"], label="dis_loss", color="darkorange")
     plt.plot(
-        history["dis_real_loss"],
+        history["w_loss"],
         label="dis_real_loss",
         color="darkorange",
         linestyle="--",
     )
-    plt.plot(
-        history["dis_fake_loss"],
-        label="dis_fake_loss",
-        color="darkorange",
-        linestyle=":",
-    )
 
-    plt.plot(history["gen_loss"], label="gen_loss", color="darkgreen", lw=1)
+    plt.plot(history["gen_loss"], label="gen_loss", color="darkgreen")
 
     plt.axhline(math.log(2), color="red", linestyle="--", label="Equilibrium Loss")
 

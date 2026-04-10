@@ -5,7 +5,9 @@ import pandas as pd
 
 from src import plot
 
-with open("out/history.pkl", "rb") as f:
+FILENAME = "out/new_run/history.pkl"
+
+with open(FILENAME, "rb") as f:
     history = pickle.load(f)
 
 history["gen_loss"] = pd.Series(history["gen_loss"]).rolling(window=100).mean()

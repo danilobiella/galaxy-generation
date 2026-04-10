@@ -1,7 +1,7 @@
 import os
 import time
 from functools import partial
-from typing import NamedTuple, Tuple
+from typing import NamedTuple
 
 import haiku as hk
 import jax
@@ -13,9 +13,7 @@ import optax  # type: ignore
 
 class ModelState(NamedTuple):
     gen_params: hk.Params
-    gen_nn_state: hk.State
     dis_params: hk.Params
-    dis_nn_state: hk.State
 
 
 class TrainState(NamedTuple):
@@ -25,117 +23,68 @@ class TrainState(NamedTuple):
     step: jnp.ndarray
 
 
-IDX_TO_CLASS = {
-    0: "Disturbed Galaxies",
-    1: "Merging Galaxies",
-    2: "Round Smooth\nGalaxies",
-    3: "In-between Round\nSmooth Galaxies",
-    4: "Cigar Shaped\nSmooth Galaxies",
-    5: "Barred Spiral\nGalaxies",
-    6: "Unbarred Tight\nSpiral Galaxies",
-    7: "Unbarred Loose\nSpiral Galaxies",
-    8: "Edge-on Galaxies\nwithout Bulge",
-    9: "Edge-on Galaxies\nwith Bulge",
-}
-
-
 @jax.jit
 def get_global_norm(tree):
-    """Calculates the L2 norm of a pytree (params or grads)."""
     leaves = jax.tree_util.tree_leaves(tree)
     return jnp.sqrt(sum(jnp.sum(jnp.square(l)) for l in leaves))
 
 
 def make_model_fns(
-    gen: hk.TransformedWithState,
-    dis: hk.TransformedWithState,
+    gen: hk.Transformed,
+    dis: hk.Transformed,
     latent_dim: int = 128,
     image_shape: tuple[int, int, int] = (256, 256, 3),
 ):
-    """
-    Model-only API.
+    def init_model_state(rng: jax.Array) -> ModelState:
+        dummy_z = jnp.zeros((1, latent_dim))
+        dummy_label = jnp.zeros((1,), dtype=jnp.int32)
+        dummy_image = jnp.zeros((1, *image_shape))
 
-    Returns:
-        init_model_state: initialize params + nn_state
-        gen_fn: generate and save images from the current generator state
-    """
+        gen_params = gen.init(rng, (dummy_z, dummy_label))
+        dis_params = dis.init(rng, (dummy_image, dummy_label))
 
-    def init_model_state(
-        rng: jax.Array,
-    ) -> ModelState:
-        dummy_image = jnp.zeros((1, *image_shape))  # [1, H, W, C]
-        dummy_z = jnp.zeros((1, latent_dim))  # [1, latent_dim]
-        dummy_label = jnp.zeros((1,), dtype=jnp.int32)  # [1] class label
-        dummy_image_input = (dummy_image, dummy_label)
-        dummy_gen_input = (dummy_z, dummy_label)
-        dis_params, dis_nn_state = dis.init(rng, dummy_image_input, is_training=True)
-        gen_params, gen_nn_state = gen.init(rng, dummy_gen_input, is_training=True)
-        return ModelState(
-            gen_params=gen_params,
-            gen_nn_state=gen_nn_state,
-            dis_params=dis_params,
-            dis_nn_state=dis_nn_state,
-        )
+        return ModelState(gen_params=gen_params, dis_params=dis_params)
 
     def generate_and_save_images(
         key: jax.Array,
         model_state: ModelState,
         filepath: str = "generated_images.png",
     ):
-        """
-        Generates a 5x10 grid: 10 columns (classes) and 5 rows (samples per class).
-        """
-        n_rows = 5
-        n_cols = 10
-
+        n_rows, n_cols = 5, 10
         fig, axes = plt.subplots(n_rows, n_cols, figsize=(20, 12))
-        plt.subplots_adjust(wspace=0.1, hspace=0.3)
 
         @jax.jit
-        def _generate(params, state, input):
-            images, _ = gen.apply(params, state, None, input, is_training=False)
-            return images
+        def _generate(params, input):
+            return gen.apply(params, None, input)
 
         for class_idx in range(n_cols):
             key, col_key = jax.random.split(key)
-            z = jax.random.normal(col_key, (n_rows, 128))
+            z = jax.random.normal(col_key, (n_rows, latent_dim))
             input = (z, jnp.full((n_rows,), class_idx))
 
-            generated_images = _generate(
-                model_state.gen_params, model_state.gen_nn_state, input
-            )
-
+            generated_images = _generate(model_state.gen_params, input)
             generated_images = (generated_images + 1.0) / 2.0
             images_np = jax.device_get(generated_images)
 
-            class_name = IDX_TO_CLASS.get(class_idx, f"Class {class_idx}")
-            axes[0, class_idx].set_title(class_name, fontsize=10, fontweight="bold")
-
             for row_idx in range(n_rows):
                 ax = axes[row_idx, class_idx]
-                img = images_np[row_idx]
-
-                if img.shape[-1] == 1:
-                    ax.imshow(img.squeeze(), cmap="gray")
-                else:
-                    ax.imshow(img)
-
+                ax.imshow(images_np[row_idx])
                 ax.axis("off")
 
         plt.tight_layout()
-        plt.savefig(filepath, bbox_inches="tight", pad_inches=0.1)
+        plt.savefig(filepath, bbox_inches="tight")
         plt.close(fig)
-
         print(f"Generated samples saved to: {filepath}")
 
     return init_model_state, generate_and_save_images
 
 
 def make_train_fns(
-    gen: hk.TransformedWithState,
-    dis: hk.TransformedWithState,
+    gen: hk.Transformed,
+    dis: hk.Transformed,
     optimizer: optax.GradientTransformation,
     latent_dim: int = 128,
+    lambda_gp: float = 10.0,
 ):
     def init_train_state(model_state: ModelState) -> TrainState:
         gen_opt_state = optimizer.init(model_state.gen_params)
@@ -148,122 +97,91 @@ def make_train_fns(
         )
 
     @partial(jax.jit, static_argnames=["batch_size"])
-    def gen_train_step(
-        key: jax.Array,
-        state: TrainState,
-        batch_size: int,
-    ) -> tuple[TrainState, dict]:
+    def gen_train_step(key, state, batch_size):
         def gen_loss_fn(gen_params, dis_params, key):
             z_key, c_key = jax.random.split(key)
             z = jax.random.normal(z_key, (batch_size, latent_dim))
             c = jax.random.randint(c_key, (batch_size,), 0, 10)
 
-            gen_images, new_gen_nn_state = gen.apply(
-                gen_params,
-                state.model_state.gen_nn_state,
-                None,
-                (z, c),
-                is_training=True,
-            )
-            logits, _ = dis.apply(
-                dis_params,
-                state.model_state.dis_nn_state,
-                None,
-                (gen_images, c),
-                is_training=True,
-            )
-            loss = jnp.mean(jax.nn.softplus(-logits))
-            return loss, new_gen_nn_state
+            gen_images = gen.apply(gen_params, None, (z, c))
+            logits = dis.apply(dis_params, None, (gen_images, c))
+            return -jnp.mean(logits)  # WGAN Gen Loss
 
-        (loss, gen_nn_state), grads = jax.value_and_grad(gen_loss_fn, has_aux=True)(
+        loss, grads = jax.value_and_grad(gen_loss_fn)(
             state.model_state.gen_params, state.model_state.dis_params, key
         )
-
         updates, new_opt_state = optimizer.update(
             grads, state.gen_opt_state, state.model_state.gen_params
         )
-        new_params = optax.apply_updates(state.model_state.gen_params, updates)
+        new_gen_params = optax.apply_updates(state.model_state.gen_params, updates)
 
-        metrics = {
-            "gen_loss": loss,
-            "gen_grad_norm": get_global_norm(grads),
-            "gen_param_norm": get_global_norm(new_params),
-        }
-
-        new_state = state._replace(
-            model_state=state.model_state._replace(
-                gen_params=new_params, gen_nn_state=gen_nn_state
-            ),
+        return state._replace(
+            model_state=state.model_state._replace(gen_params=new_gen_params),
             gen_opt_state=new_opt_state,
             step=state.step + 1,
-        )
-        return new_state, metrics
+        ), {
+            "gen_loss": loss,
+            "gen_grad_norm": get_global_norm(grads),
+            "gen_param_norm": get_global_norm(new_gen_params),
+        }
 
     @jax.jit
-    def dis_train_step(
-        key: jax.Array,
-        state: TrainState,
-        real_input: Tuple[jnp.ndarray, jnp.ndarray],
-    ) -> tuple[TrainState, dict]:
-        def dis_loss_fn(disc_params, gen_params, key):
-            z_key, c_key = jax.random.split(key)
-            z = jax.random.normal(z_key, (real_input[0].shape[0], latent_dim))
-            c = jax.random.randint(c_key, (real_input[1].shape[0],), 0, 10)
+    def dis_train_step(key, state, real_input):
+        real_imgs, labels = real_input
 
-            fake_images, _ = gen.apply(
-                gen_params,
-                state.model_state.gen_nn_state,
-                None,
-                (z, c),
-                is_training=True,
-            )
+        def dis_loss_fn(dis_params, gen_params, key):
+            key_z, key_gp = jax.random.split(key)
+            z = jax.random.normal(key_z, (real_imgs.shape[0], latent_dim))
+            fake_imgs = gen.apply(gen_params, None, (z, labels))
 
-            # Real forward
-            real_logits, new_nn_state = dis.apply(
-                disc_params,
-                state.model_state.dis_nn_state,
-                None,
-                real_input,
-                is_training=True,
-            )
-            # Fake forward
-            fake_logits, new_nn_state = dis.apply(
-                disc_params, new_nn_state, None, (fake_images, c), is_training=True
-            )
+            real_logits = dis.apply(dis_params, None, (real_imgs, labels))
+            fake_logits = dis.apply(dis_params, None, (fake_imgs, labels))
 
-            l_real = jnp.mean(
-                0.9 * jax.nn.softplus(-real_logits) + 0.1 * jax.nn.softplus(real_logits)
-            )
-            l_fake = jnp.mean(jax.nn.softplus(fake_logits))
+            w_loss = jnp.mean(fake_logits) - jnp.mean(real_logits)
 
-            total_loss = (l_real + l_fake) / 2.0
-            return total_loss, (l_real, l_fake, new_nn_state)
+            # --- Gradient Penalty Logic ---
+            alpha = jax.random.uniform(key_gp, (real_imgs.shape[0], 1, 1, 1))
+            interpolates = alpha * real_imgs + (1 - alpha) * fake_imgs
 
-        (loss, (l_real, l_fake, dis_nn_state)), grads = jax.value_and_grad(
+            # 1. Correct the internal function to use its arguments (img, lbl)
+            def critic_forward(img, lbl):
+                # We add [None] to both to create a "batch of 1" for Haiku Conv layers
+                logits = dis.apply(dis_params, None, (img[None], lbl[None]))
+                return jnp.sum(logits)
+
+            # 2. Tell vmap to slice BOTH arguments (in_axes=(0, 0))
+            grad_fn = jax.vmap(jax.grad(critic_forward), in_axes=(0, 0))
+
+            # 3. Pass both the interpolated images and the batch labels
+            interp_grads = grad_fn(interpolates, labels)
+
+            norms = jnp.sqrt(jnp.sum(jnp.square(interp_grads), axis=(1, 2, 3)) + 1e-8)
+            gp = jnp.mean((norms - 1.0) ** 2)
+
+            return w_loss + lambda_gp * gp, (w_loss, jnp.mean(norms))
+
+        # The rest of the function remains the same...
+        (total_loss, (w_loss, grad_norm)), grads = jax.value_and_grad(
             dis_loss_fn, has_aux=True
         )(state.model_state.dis_params, state.model_state.gen_params, key)
 
         updates, new_opt_state = optimizer.update(
             grads, state.dis_opt_state, state.model_state.dis_params
         )
-        new_params = optax.apply_updates(state.model_state.dis_params, updates)
+        new_dis_params = optax.apply_updates(state.model_state.dis_params, updates)
 
         metrics = {
-            "dis_loss": loss,
-            "dis_real_loss": l_real,
-            "dis_fake_loss": l_fake,
-            "dis_grad_norm": get_global_norm(grads),
-            "dis_param_norm": get_global_norm(new_params),
+            "dis_loss": total_loss,
+            "w_loss": w_loss,
+            "dis_grad_norm": grad_norm,
+            "dis_param_norm": get_global_norm(new_dis_params),
         }
 
-        new_state = state._replace(
-            model_state=state.model_state._replace(
-                dis_params=new_params, dis_nn_state=dis_nn_state
-            ),
+        return state._replace(
+            model_state=state.model_state._replace(dis_params=new_dis_params),
             dis_opt_state=new_opt_state,
             step=state.step + 1,
-        )
-        return new_state, metrics
+        ), metrics
 
     return init_train_state, gen_train_step, dis_train_step
 
@@ -284,11 +202,9 @@ def train_epoch(
     n_batches = len(train_ds)
     ds_iter = iter(train_ds)
 
-    # Store EVERYTHING for high-res plotting later
     epoch_metrics = {
         "dis_loss": [],
-        "dis_real_loss": [],
-        "dis_fake_loss": [],
+        "w_loss": [],
         "dis_grad_norm": [],
         "dis_param_norm": [],
         "gen_loss": [],
@@ -299,7 +215,6 @@ def train_epoch(
     # Tracking indices for windowed averaging
     last_d_idx = 0
     last_g_idx = 0
-
     for i in range(n_batches):
         batch = next(ds_iter)
 
@@ -324,10 +239,8 @@ def train_epoch(
             lr = schedule(int(train_state.step))
 
             win_dis_loss = np.mean(epoch_metrics["dis_loss"][last_d_idx:])
-            win_real = np.mean(epoch_metrics["dis_real_loss"][last_d_idx:])
-            win_fake = np.mean(epoch_metrics["dis_fake_loss"][last_d_idx:])
+            win_w_loss = np.mean(epoch_metrics["w_loss"][last_d_idx:])
             win_d_grad = np.mean(epoch_metrics["dis_grad_norm"][last_d_idx:])
-
             win_gen_loss = (
                 np.mean(epoch_metrics["gen_loss"][last_g_idx:])
                 if epoch_metrics["gen_loss"]
@@ -342,12 +255,11 @@ def train_epoch(
             print(
                 f"[Ep {epoch}/{n_epochs}][B {i}/{n_batches}] "
                 f"G_L: {win_gen_loss:.4f} | "
-                f"D_L: {win_dis_loss:.4f} (R:{win_real:.3f}/F:{win_fake:.3f}) | "
+                f"D_L: {win_dis_loss:.4f} | W_D: {win_w_loss:.4f} | "
                 f"G_Grad: {win_g_grad:.2e} | D_Grad: {win_d_grad:.2e} | "
                 f"LR: {lr:.2e}"
             )
 
-            # Slide the window
             last_d_idx = len(epoch_metrics["dis_loss"])
             last_g_idx = len(epoch_metrics["gen_loss"])
 
@@ -369,8 +281,7 @@ def fit_model(
 ):
     history = {
         "dis_loss": [],
-        "dis_real_loss": [],
-        "dis_fake_loss": [],
+        "w_loss": [],
         "dis_grad_norm": [],
         "dis_param_norm": [],
         "gen_loss": [],

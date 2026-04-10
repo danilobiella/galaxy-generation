@@ -18,7 +18,7 @@ DATA_PATH = "data/galaxy10_decals_lmdb"
 IMAGE_SIZE = (256, 256)
 LATENT_DIM = 128
 N_GEN_STEPS = 1
-N_DIS_STEPS = 1
+N_DIS_STEPS = 5
 
 KAGGLE_DATA_PATH = "/kaggle/input/galaxy10-DECaLS"
 LOCAL_DATA_PATH = "data/galaxy10_decals_lmdb"
@@ -70,8 +70,7 @@ print(
 def schedule(step):
     return 1e-4
 
-
-optimizer = optax.adam(learning_rate=1e-4, b1=0.5)
+optimizer = optax.adam(learning_rate=1e-4, b1=0.0, b2=0.9)
 print("built optimizer and schedule")
 
 # %%
