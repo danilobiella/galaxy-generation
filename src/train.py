@@ -9,10 +9,6 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import optax  # type: ignore
-import rich
-from rich.console import Console
-from rich.progress import (BarColumn, MofNCompleteColumn, Progress, TextColumn,
-                           TimeElapsedColumn, TimeRemainingColumn)
 
 
 class ModelState(NamedTuple):
@@ -41,6 +37,13 @@ IDX_TO_CLASS = {
     8: "Edge-on Galaxies\nwithout Bulge",
     9: "Edge-on Galaxies\nwith Bulge",
 }
+
+
+@jax.jit
+def get_global_norm(tree):
+    """Calculates the L2 norm of a pytree (params or grads)."""
+    leaves = jax.tree_util.tree_leaves(tree)
+    return jnp.sqrt(sum(jnp.sum(jnp.square(l)) for l in leaves))
 
 
 def make_model_fns(
@@ -134,14 +137,6 @@ def make_train_fns(
     optimizer: optax.GradientTransformation,
     latent_dim: int = 128,
 ):
-    """
-    Training API.
-
-    Returns:
-        init_train_state: create optimizer state from a ModelState
-        train_step: one SGD/optimizer update step
-    """
-
     def init_train_state(model_state: ModelState) -> TrainState:
         gen_opt_state = optimizer.init(model_state.gen_params)
         dis_opt_state = optimizer.init(model_state.dis_params)
@@ -157,76 +152,73 @@ def make_train_fns(
         key: jax.Array,
         state: TrainState,
         batch_size: int,
-    ) -> tuple[TrainState, dict[str, jnp.ndarray]]:
-        def gen_loss(gen_params, dis_params, key):
+    ) -> tuple[TrainState, dict]:
+        def gen_loss_fn(gen_params, dis_params, key):
             z_key, c_key = jax.random.split(key)
             z = jax.random.normal(z_key, (batch_size, latent_dim))
             c = jax.random.randint(c_key, (batch_size,), 0, 10)
-            gen_input = (z, c)
 
             gen_images, new_gen_nn_state = gen.apply(
                 gen_params,
                 state.model_state.gen_nn_state,
                 None,
-                gen_input,
+                (z, c),
                 is_training=True,
             )
-            dis_input = (gen_images, c)
             logits, _ = dis.apply(
                 dis_params,
                 state.model_state.dis_nn_state,
                 None,
-                dis_input,
+                (gen_images, c),
                 is_training=True,
             )
             loss = jnp.mean(jax.nn.softplus(-logits))
             return loss, new_gen_nn_state
 
-        key, step_key = jax.random.split(key)
-        (gen_loss, gen_nn_state), gen_grads = jax.value_and_grad(
-            gen_loss, argnums=0, has_aux=True
-        )(state.model_state.gen_params, state.model_state.dis_params, step_key)
-
-        gen_updates, new_gen_opt_state = optimizer.update(
-            gen_grads,
-            state.gen_opt_state,
-            state.model_state.gen_params,
+        (loss, gen_nn_state), grads = jax.value_and_grad(gen_loss_fn, has_aux=True)(
+            state.model_state.gen_params, state.model_state.dis_params, key
         )
 
-        new_gen_params = optax.apply_updates(state.model_state.gen_params, gen_updates)
+        updates, new_opt_state = optimizer.update(
+            grads, state.gen_opt_state, state.model_state.gen_params
+        )
+        new_params = optax.apply_updates(state.model_state.gen_params, updates)
 
-        new_state = TrainState(
-            model_state=ModelState(
-                gen_params=new_gen_params,
-                gen_nn_state=gen_nn_state,
-                dis_params=state.model_state.dis_params,
-                dis_nn_state=state.model_state.dis_nn_state,
+        metrics = {
+            "gen_loss": loss,
+            "gen_grad_norm": get_global_norm(grads),
+            "gen_param_norm": get_global_norm(new_params),
+        }
+
+        new_state = state._replace(
+            model_state=state.model_state._replace(
+                gen_params=new_params, gen_nn_state=gen_nn_state
             ),
-            gen_opt_state=new_gen_opt_state,
-            dis_opt_state=state.dis_opt_state,
+            gen_opt_state=new_opt_state,
             step=state.step + 1,
         )
-
-        return new_state, {"gen_loss": gen_loss}  # type: ignore
+        return new_state, metrics
 
     @jax.jit
     def dis_train_step(
         key: jax.Array,
         state: TrainState,
         real_input: Tuple[jnp.ndarray, jnp.ndarray],
-    ) -> tuple[TrainState, dict[str, jnp.ndarray]]:
-        def dis_loss(gen_params, disc_params, key):
-            key_z, key_c = jax.random.split(key)
-            z = jax.random.normal(key, (real_input[0].shape[0], latent_dim))
-            c = jax.random.randint(key_c, (real_input[1].shape[0],), 0, 10)
-            gen_input = (z, c)
-            gen_images, _ = gen.apply(
+    ) -> tuple[TrainState, dict]:
+        def dis_loss_fn(disc_params, gen_params, key):
+            z_key, c_key = jax.random.split(key)
+            z = jax.random.normal(z_key, (real_input[0].shape[0], latent_dim))
+            c = jax.random.randint(c_key, (real_input[1].shape[0],), 0, 10)
+
+            fake_images, _ = gen.apply(
                 gen_params,
                 state.model_state.gen_nn_state,
                 None,
-                gen_input,
+                (z, c),
                 is_training=True,
             )
+
+            # Real forward
             real_logits, new_nn_state = dis.apply(
                 disc_params,
                 state.model_state.dis_nn_state,
@@ -234,85 +226,46 @@ def make_train_fns(
                 real_input,
                 is_training=True,
             )
-            fake_input = (gen_images, c)
+            # Fake forward
             fake_logits, new_nn_state = dis.apply(
-                disc_params,
-                new_nn_state,
-                None,
-                fake_input,
-                is_training=True,
+                disc_params, new_nn_state, None, (fake_images, c), is_training=True
             )
-            real_loss = 0.9 * jax.nn.softplus(-real_logits) + 0.1 * jax.nn.softplus(
-                real_logits
+
+            l_real = jnp.mean(
+                0.9 * jax.nn.softplus(-real_logits) + 0.1 * jax.nn.softplus(real_logits)
             )
-            fake_loss = jax.nn.softplus(fake_logits)
-            loss = jnp.mean(real_loss + fake_loss)
+            l_fake = jnp.mean(jax.nn.softplus(fake_logits))
 
-            return loss, new_nn_state
+            total_loss = (l_real + l_fake) / 2.0
+            return total_loss, (l_real, l_fake, new_nn_state)
 
-        key, step_key = jax.random.split(key)
-        (dis_loss, dis_nn_state), dis_grads = jax.value_and_grad(
-            dis_loss, argnums=1, has_aux=True
-        )(state.model_state.gen_params, state.model_state.dis_params, step_key)
+        (loss, (l_real, l_fake, dis_nn_state)), grads = jax.value_and_grad(
+            dis_loss_fn, has_aux=True
+        )(state.model_state.dis_params, state.model_state.gen_params, key)
 
-        dis_updates, new_dis_opt_state = optimizer.update(
-            dis_grads,
-            state.dis_opt_state,
-            state.model_state.dis_params,
+        updates, new_opt_state = optimizer.update(
+            grads, state.dis_opt_state, state.model_state.dis_params
         )
+        new_params = optax.apply_updates(state.model_state.dis_params, updates)
 
-        new_dis_params = optax.apply_updates(state.model_state.dis_params, dis_updates)
+        metrics = {
+            "dis_loss": loss,
+            "dis_real_loss": l_real,
+            "dis_fake_loss": l_fake,
+            "dis_grad_norm": get_global_norm(grads),
+            "dis_param_norm": get_global_norm(new_params),
+        }
 
-        new_state = TrainState(
-            model_state=ModelState(
-                gen_params=state.model_state.gen_params,
-                gen_nn_state=state.model_state.gen_nn_state,
-                dis_params=new_dis_params,
-                dis_nn_state=dis_nn_state,
+        new_state = state._replace(
+            model_state=state.model_state._replace(
+                dis_params=new_params, dis_nn_state=dis_nn_state
             ),
-            gen_opt_state=state.gen_opt_state,
-            dis_opt_state=new_dis_opt_state,
+            dis_opt_state=new_opt_state,
             step=state.step + 1,
         )
-
-        return new_state, {"dis_loss": dis_loss}  # type: ignore
+        return new_state, metrics
 
     return init_train_state, gen_train_step, dis_train_step
-
-
-def evaluate_dataset(model_state, eval_step, data_loader, progress_bar=False):
-    total_correct = 0
-    total_top5 = 0
-    total_samples = 0
-    losses = []
-
-    if progress_bar:
-        data_loader = rich.progress.track(
-            data_loader, description="[bold cyan]Evaluating...", transient=True
-        )
-    for batch in data_loader:
-        xb, yb = batch["x"], batch["y"]
-        metrics = eval_step(model_state, xb, yb)
-
-        preds = jnp.argmax(metrics["logits"], axis=-1)
-        correct = jnp.sum(preds == yb)
-
-        top5 = jax.lax.top_k(metrics["logits"], 5)[1]
-        top5_correct = jnp.sum(jnp.any(top5 == yb[:, None], axis=1))
-
-        batch_size = yb.shape[0]
-
-        total_correct += int(correct)
-        total_top5 += int(top5_correct)
-        total_samples += batch_size
-
-        losses.append(float(metrics["loss"]))
-
-    return {
-        "loss": float(np.mean(losses)),
-        "accuracy": total_correct / total_samples,
-        "top5_accuracy": total_top5 / total_samples,
-    }
 
 
 def train_epoch(
@@ -326,85 +279,79 @@ def train_epoch(
     n_gen_steps: int,
     n_dis_steps: int,
     schedule,
-    console: Console,
+    print_every: int = 100,
 ):
-    gen_losses = []
-    dis_losses = []
-
     n_batches = len(train_ds)
+    ds_iter = iter(train_ds)
 
-    progress = Progress(
-        TextColumn("[bold cyan]Epoch {task.fields[epoch]}/{task.fields[n_epochs]}"),
-        BarColumn(),
-        MofNCompleteColumn(),
-        TextColumn("•"),
-        TextColumn("gen_loss: {task.fields[gen_loss]:.4f}"),
-        TextColumn("•"),
-        TextColumn("dis_loss: {task.fields[dis_loss]:.4f}"),
-        TextColumn("•"),
-        TextColumn("lr: {task.fields[lr]:.2e}"),
-        TextColumn("•"),
-        TimeElapsedColumn(),
-        TextColumn("/"),
-        TimeRemainingColumn(),
-        console=console,
-        transient=True,
-    )
-
-    with progress:
-        task_id = progress.add_task(
-            "train",
-            total=n_batches,
-            epoch=epoch,
-            n_epochs=n_epochs,
-            gen_loss=0.0,
-            dis_loss=0.0,
-            lr=float(schedule(int(train_state.step))),
-        )
-
-        batch_loading_time = []
-        train_batch_time = []
-
-        ds_iter = iter(train_ds)
-
-        for i in range(n_batches):
-            st = time.time()
-            batch = next(ds_iter)
-            batch_loading_time.append(time.time() - st)
-
-            st = time.time()
-            key, step_key = jax.random.split(key)
-            train_state, metrics = dis_step(step_key, train_state, batch)
-            train_batch_time.append(time.time() - st)
-
-            dis_batch_loss = float(metrics["dis_loss"])
-            dis_losses.append(dis_batch_loss)
-
-            if i % n_dis_steps == 0:
-                for _ in range(n_gen_steps):
-                    key, step_key = jax.random.split(key)
-                    train_state, metrics = gen_step(
-                        step_key, train_state, batch[0].shape[0]
-                    )
-                    gen_batch_loss = float(metrics["gen_loss"])
-                    gen_losses.append(gen_batch_loss)
-
-            progress.update(
-                task_id,
-                advance=1,
-                dis_loss=float(np.mean(dis_losses)),
-                gen_loss=float(np.mean(gen_losses)),
-                lr=float(schedule(int(train_state.step))),
-            )
-
-    train_metrics = {
-        "gen_loss": float(np.mean(gen_losses)),
-        "dis_loss": float(np.mean(dis_losses)),
-        "batch_loading_time": float(np.mean(batch_loading_time)),
-        "train_batch_time": float(np.mean(train_batch_time)),
+    # Store EVERYTHING for high-res plotting later
+    epoch_metrics = {
+        "dis_loss": [],
+        "dis_real_loss": [],
+        "dis_fake_loss": [],
+        "dis_grad_norm": [],
+        "dis_param_norm": [],
+        "gen_loss": [],
+        "gen_grad_norm": [],
+        "gen_param_norm": [],
     }
 
-    return train_state, train_metrics, key
+    # Tracking indices for windowed averaging
+    last_d_idx = 0
+    last_g_idx = 0
+
+    for i in range(n_batches):
+        batch = next(ds_iter)
+
+        key, step_key = jax.random.split(key)
+        train_state, d_metrics = dis_step(step_key, train_state, batch)
+
+        for k, v in d_metrics.items():
+            if k in epoch_metrics:
+                epoch_metrics[k].append(float(v))
+
+        if i % n_dis_steps == 0:
+            for _ in range(n_gen_steps):
+                key, step_key = jax.random.split(key)
+                train_state, g_metrics = gen_step(
+                    step_key, train_state, batch[0].shape[0]
+                )
+                for k, v in g_metrics.items():
+                    if k in epoch_metrics:
+                        epoch_metrics[k].append(float(v))
+
+        if i > 0 and i % print_every == 0:
+            lr = schedule(int(train_state.step))
+
+            win_dis_loss = np.mean(epoch_metrics["dis_loss"][last_d_idx:])
+            win_real = np.mean(epoch_metrics["dis_real_loss"][last_d_idx:])
+            win_fake = np.mean(epoch_metrics["dis_fake_loss"][last_d_idx:])
+            win_d_grad = np.mean(epoch_metrics["dis_grad_norm"][last_d_idx:])
+
+            win_gen_loss = (
+                np.mean(epoch_metrics["gen_loss"][last_g_idx:])
+                if epoch_metrics["gen_loss"]
+                else 0.0
+            )
+            win_g_grad = (
+                np.mean(epoch_metrics["gen_grad_norm"][last_g_idx:])
+                if epoch_metrics["gen_grad_norm"]
+                else 0.0
+            )
+
+            print(
+                f"[Ep {epoch}/{n_epochs}][B {i}/{n_batches}] "
+                f"G_L: {win_gen_loss:.4f} | "
+                f"D_L: {win_dis_loss:.4f} (R:{win_real:.3f}/F:{win_fake:.3f}) | "
+                f"G_Grad: {win_g_grad:.2e} | D_Grad: {win_d_grad:.2e} | "
+                f"LR: {lr:.2e}"
+            )
+
+            # Slide the window
+            last_d_idx = len(epoch_metrics["dis_loss"])
+            last_g_idx = len(epoch_metrics["gen_loss"])
+
+    return train_state, epoch_metrics, key
 
 
 def fit_model(
@@ -415,61 +362,61 @@ def fit_model(
     gen_fn,
     schedule,
     train_ds,
-    n_epochs: int = 20,
+    n_epochs: int = 50,
     n_gen_steps: int = 10,
     n_dis_steps: int = 10,
+    print_every: int = 100,
 ):
-    print("Starting training...")
-    console = Console()
-
-    history: dict[str, list[float]] = {
-        "gen_train_loss": [],
-        "dis_train_loss": [],
-        "lr": [],
+    history = {
+        "dis_loss": [],
+        "dis_real_loss": [],
+        "dis_fake_loss": [],
+        "dis_grad_norm": [],
+        "dis_param_norm": [],
+        "gen_loss": [],
+        "gen_grad_norm": [],
+        "gen_param_norm": [],
     }
 
-    console.print(
-        f"[bold blue]Training setup[/bold blue]  train_batches={len(train_ds)}  "
-    )
+    print(f"\nStarting Training | Epochs: {n_epochs} | Batches: {len(train_ds)}")
+    print("-" * 110)
 
-    key, gen_key = jax.random.split(key)
     for epoch in range(1, n_epochs + 1):
+        start_time = time.time()
+
         key, subkey = jax.random.split(key)
-        train_state, train_metrics, key = train_epoch(
+        train_state, epoch_data, key = train_epoch(
             key=subkey,
             train_state=train_state,
             gen_step=gen_step,
             dis_step=dis_step,
             train_ds=train_ds,
             epoch=epoch,
+            n_epochs=n_epochs,
             n_gen_steps=n_gen_steps,
             n_dis_steps=n_dis_steps,
-            n_epochs=n_epochs,
             schedule=schedule,
-            console=console,
+            print_every=print_every,
         )
 
-        # Generate and save sample images at the end of each epoch
+        for key_name, values in epoch_data.items():
+            history[key_name].extend(values)
+
+        epoch_time = time.time() - start_time
+
         os.makedirs("figures", exist_ok=True)
         gen_fn(
-            key=gen_key,
+            key=key,
             model_state=train_state.model_state,
-            filepath=f"figures/epoch_{epoch}_samples.png",
+            filepath=f"figures/epoch_{epoch}.png",
         )
 
-        lr = float(schedule(int(train_state.step)))
-
-        history["gen_train_loss"].append(train_metrics["gen_loss"])
-        history["dis_train_loss"].append(train_metrics["dis_loss"])
-        history["lr"].append(lr)
-
-        console.print(
-            f"[bold green]Epoch {epoch:02d}/{n_epochs}[/bold green]  "
-            f"gen_train_loss={train_metrics['gen_loss']:.4f}  "
-            f"dis_train_loss={train_metrics['dis_loss']:.4f}  "
-            f"batch_loading_time={train_metrics['batch_loading_time']:.4f}  "
-            f"train_batch_time={train_metrics['train_batch_time']:.4f}  "
-            f"lr={lr:.2e}",
+        avg_g = np.mean(epoch_data["gen_loss"]) if epoch_data["gen_loss"] else 0.0
+        avg_d = np.mean(epoch_data["dis_loss"])
+        print(
+            f"[EPOCH {epoch}] COMPLETED | Time: {epoch_time:.1f}s | "
+            f"AVG G_Loss: {avg_g:.4f} | AVG D_Loss: {avg_d:.4f}"
         )
+        print("-" * 110)
 
     return train_state, history

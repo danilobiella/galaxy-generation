@@ -1,13 +1,36 @@
 import pickle
-import matplotlib.pyplot as plt
 
-with open("out/history_first_run.pkl", "rb") as f:
+import matplotlib.pyplot as plt
+import pandas as pd
+
+from src import plot
+
+with open("out/history.pkl", "rb") as f:
     history = pickle.load(f)
 
-plt.figure(figsize=(8, 4))
-plt.plot(history["gen_train_loss"], label="gen_train_loss")
-plt.plot(history["dis_train_loss"], label="dis_train_loss")
-plt.legend()
-plt.xlabel("epoch")
-plt.ylabel("loss")
-plt.show()
+history["gen_loss"] = pd.Series(history["gen_loss"]).rolling(window=100).mean()
+
+history["dis_loss"] = pd.Series(history["dis_loss"]).rolling(window=100).mean()
+history["dis_real_loss"] = (
+    pd.Series(history["dis_real_loss"]).rolling(window=100).mean()
+)
+history["dis_fake_loss"] = (
+    pd.Series(history["dis_fake_loss"]).rolling(window=100).mean()
+)
+
+history["dis_grad_norm"] = (
+    pd.Series(history["dis_grad_norm"]).rolling(window=100).mean()
+)
+history["dis_param_norm"] = (
+    pd.Series(history["dis_param_norm"]).rolling(window=100).mean()
+)
+
+history["gen_grad_norm"] = (
+    pd.Series(history["gen_grad_norm"]).rolling(window=100).mean()
+)
+history["gen_param_norm"] = (
+    pd.Series(history["gen_param_norm"]).rolling(window=100).mean()
+)
+
+plot.plot_loss(history)
+plot.plot_gradients(history)

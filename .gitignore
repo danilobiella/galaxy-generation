@@ -1,10 +1,10 @@
 data/
-tokenizers/
+figures/
 model_checkpoints/
 .kaggle_dataset/
 .kaggle_push/
 results/
-output/
+out/
 
 # pixi environments
 .pixi

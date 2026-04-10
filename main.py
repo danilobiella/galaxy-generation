@@ -1,19 +1,18 @@
-import math
 import pickle
 from pathlib import Path
 
 import haiku as hk
 import jax
 import jax.numpy as jnp
-import matplotlib.pyplot as plt
 import optax  # type: ignore
 
 from src.data_loader import make_data_loaders
 from src.models import build_network
+from src.plot import plot_gradients, plot_loss
 from src.train import fit_model, make_model_fns, make_train_fns
 
-BATCH_SIZE = 64
-N_EPOCHS = 10
+BATCH_SIZE = 16
+N_EPOCHS = 30
 SEED = 42
 DATA_PATH = "data/galaxy10_decals_lmdb"
 IMAGE_SIZE = (256, 256)
@@ -91,10 +90,6 @@ model_state = init_model_state(rng=jax.random.PRNGKey(SEED))
 train_state = init_train_state(model_state)
 print("Initialized model and training state")
 
-# key = jax.random.PRNGKey(SEED)
-# gen_train_step(key, train_state, 16)
-# dis_train_step(key, train_state, example_batch)
-
 # %% -- train --------------------------------------------------------------
 
 key = jax.random.PRNGKey(SEED)
@@ -111,23 +106,15 @@ state, history = fit_model(
     n_dis_steps=N_DIS_STEPS,
 )
 
-# # -- plots --------------------------------------------------------------
-plt.figure(figsize=(8, 4))
-plt.plot(history["gen_train_loss"], label="gen_train_loss")
-plt.plot(history["dis_train_loss"], label="dis_train_loss")
-plt.axhline(
-    math.log(2), color="red", linestyle="--", label="confused discriminator"
-)
-plt.legend()
-plt.xlabel("epoch")
-plt.ylabel("loss")
-plt.savefig("loss_plot.png")
-
-# # %% save network state and history
-
+# %% save network state and history
 
 with open("state.pkl", "wb") as f:
     pickle.dump(state, f)
 
 with open("history.pkl", "wb") as f:
     pickle.dump(history, f)
+
+# %% -- plots -----------------------------------------------
+
+plot_loss(history)
+plot_gradients(history)
