@@ -64,15 +64,15 @@ class Generator(hk.Module):
         c_onehot = jax.nn.one_hot(c, 10)
         x = jnp.concatenate([z, c_onehot], axis=-1)
 
-        x = hk.Linear(4 * 4 * 512)(x)
-        x = jnp.reshape(x, [-1, 4, 4, 512])
+        x = hk.Linear(4 * 4 * 256)(x)
+        x = jnp.reshape(x, [-1, 4, 4, 256])
 
-        # Upsampling Chain: 4 -> 8 -> 16 -> 32 -> 64 -> 128 -> 256
-        x = GenResBlock(512)(x, is_training)  # 8x8
+        # upsampling chain: 4 -> 8 -> 16 -> 32 -> 64 -> 128 -> 256
+        x = GenResBlock(256)(x, is_training)  # 8x8
         x = GenResBlock(256)(x, is_training)  # 16x16
         x = GenResBlock(128)(x, is_training)  # 32x32
-        x = GenResBlock(64)(x, is_training)  # 64x64
-        x = GenResBlock(32)(x, is_training)  # 128x128
+        x = GenResBlock(128)(x, is_training)  # 64x64
+        x = GenResBlock(64)(x, is_training)  # 128x128
 
         x = hk.Conv2DTranspose(3, kernel_shape=4, stride=2, padding="SAME")(x)
 
@@ -83,10 +83,10 @@ class Discriminator(hk.Module):
     def __call__(self, input, is_training: bool):
         x, c = input
 
-        x = DisResBlock(32)(x, is_training)
         x = DisResBlock(64)(x, is_training)
         x = DisResBlock(128)(x, is_training)
-        x = DisResBlock(256)(x, is_training)  # Spatial is now 16x16
+        x = DisResBlock(128)(x, is_training)
+        x = DisResBlock(256)(x, is_training)  # spatial is now 16x16
 
         c_onehot = jax.nn.one_hot(c, 10)
         c_spatial = c_onehot[..., jnp.newaxis, jnp.newaxis, :]
@@ -96,8 +96,8 @@ class Discriminator(hk.Module):
 
         x = jnp.concatenate([x, c_spatial], axis=-1)
 
-        x = DisResBlock(512)(x, is_training)
-        x = DisResBlock(512)(x, is_training)
+        x = DisResBlock(256)(x, is_training)
+        x = DisResBlock(256)(x, is_training)
 
         x = hk.Flatten()(x)
         return hk.Linear(1)(x)
