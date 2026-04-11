@@ -84,7 +84,7 @@ def make_train_fns(
     dis: hk.Transformed,
     optimizer: optax.GradientTransformation,
     latent_dim: int = 128,
-    lambda_gp: float = 10.0,
+    lambda_gp: float = 20.0,
 ):
     def init_train_state(model_state: ModelState) -> TrainState:
         gen_opt_state = optimizer.init(model_state.gen_params)
