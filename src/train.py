@@ -82,13 +82,14 @@ def make_model_fns(
 def make_train_fns(
     gen: hk.Transformed,
     dis: hk.Transformed,
-    optimizer: optax.GradientTransformation,
+    gen_optimizer: optax.GradientTransformation,
+    dis_optimizer: optax.GradientTransformation,
     latent_dim: int = 128,
     lambda_gp: float = 20.0,
 ):
     def init_train_state(model_state: ModelState) -> TrainState:
-        gen_opt_state = optimizer.init(model_state.gen_params)
-        dis_opt_state = optimizer.init(model_state.dis_params)
+        gen_opt_state = gen_optimizer.init(model_state.gen_params)
+        dis_opt_state = dis_optimizer.init(model_state.dis_params)
         return TrainState(
             model_state=model_state,
             gen_opt_state=gen_opt_state,
@@ -110,7 +111,7 @@ def make_train_fns(
         loss, grads = jax.value_and_grad(gen_loss_fn)(
             state.model_state.gen_params, state.model_state.dis_params, key
         )
-        updates, new_opt_state = optimizer.update(
+        updates, new_opt_state = gen_optimizer.update(
             grads, state.gen_opt_state, state.model_state.gen_params
         )
         new_gen_params = optax.apply_updates(state.model_state.gen_params, updates)
@@ -165,7 +166,7 @@ def make_train_fns(
             dis_loss_fn, has_aux=True
         )(state.model_state.dis_params, state.model_state.gen_params, key)
 
-        updates, new_opt_state = optimizer.update(
+        updates, new_opt_state = dis_optimizer.update(
             grads, state.dis_opt_state, state.model_state.dis_params
         )
         new_dis_params = optax.apply_updates(state.model_state.dis_params, updates)
@@ -202,7 +203,7 @@ def train_epoch(
     n_batches = len(train_ds)
     ds_iter = iter(train_ds)
 
-    epoch_metrics = {
+    epoch_metrics: dict[str, list[float]] = {
         "dis_loss": [],
         "w_loss": [],
         "dis_grad_norm": [],
@@ -279,7 +280,7 @@ def fit_model(
     n_dis_steps: int = 10,
     print_every: int = 100,
 ):
-    history = {
+    history: dict[str, list[float]] = {
         "dis_loss": [],
         "w_loss": [],
         "dis_grad_norm": [],

@@ -4,6 +4,7 @@ from pathlib import Path
 import haiku as hk
 import jax
 import jax.numpy as jnp
+import matplotlib.pyplot as plt
 import optax  # type: ignore
 
 from src.data_loader import make_data_loaders
@@ -11,7 +12,7 @@ from src.models import build_network
 from src.plot import plot_gradients, plot_loss
 from src.train import fit_model, make_model_fns, make_train_fns
 
-BATCH_SIZE = 16
+BATCH_SIZE = 32
 N_EPOCHS = 30
 SEED = 42
 DATA_PATH = "data/galaxy10_decals_lmdb"
@@ -70,7 +71,8 @@ print(
 def schedule(step):
     return 1e-4
 
-optimizer = optax.adam(learning_rate=1e-4, b1=0.0, b2=0.9)
+gen_optimizer = optax.adam(learning_rate=1e-4, b1=0.0, b2=0.9)
+dis_optimizer = optax.adam(learning_rate=2e-4, b1=0.0, b2=0.9)
 print("built optimizer and schedule")
 
 # %%
@@ -82,7 +84,7 @@ init_model_state, generate_fn = make_model_fns(
     gen, dis, latent_dim=LATENT_DIM, image_shape=image_shape[1:]
 )
 init_train_state, gen_train_step, dis_train_step = make_train_fns(
-    gen, dis, optimizer, latent_dim=LATENT_DIM
+    gen, dis, gen_optimizer, dis_optimizer, latent_dim=LATENT_DIM
 )
 
 model_state = init_model_state(rng=jax.random.PRNGKey(SEED))
