@@ -5,7 +5,7 @@ import pandas as pd
 
 from src import plot
 
-FILENAME = "out/new_run/history.pkl"
+FILENAME = "runs/wgan_long_run2/history.pkl"
 
 with open(FILENAME, "rb") as f:
     history = pickle.load(f)
@@ -13,11 +13,8 @@ with open(FILENAME, "rb") as f:
 history["gen_loss"] = pd.Series(history["gen_loss"]).rolling(window=100).mean()
 
 history["dis_loss"] = pd.Series(history["dis_loss"]).rolling(window=100).mean()
-history["dis_real_loss"] = (
-    pd.Series(history["dis_real_loss"]).rolling(window=100).mean()
-)
-history["dis_fake_loss"] = (
-    pd.Series(history["dis_fake_loss"]).rolling(window=100).mean()
+history["w_loss"] = (
+    pd.Series(history["w_loss"]).rolling(window=100).mean()
 )
 
 history["dis_grad_norm"] = (
