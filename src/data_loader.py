@@ -71,3 +71,54 @@ def make_data_loaders(
         .map(process)
         .batch(batch_size=batch_size, drop_remainder=True)
     )
+
+
+def make_overfit_loader(
+    db_path: str,
+    batch_size: int,
+    target_class: int = 5,  # Defaulting to 5 (Barred Spirals) - pick your favorite!
+    num_samples: int = 5,
+) -> grain.MapDataset:
+    """
+    Creates a loader that infinitely repeats the SAME 5 images from the SAME class.
+    Perfect for checking if the model has enough capacity to 'memorize' details.
+    """
+    # 1. Find indices belonging to the target class
+    temp_env = lmdb.open(db_path, readonly=True, lock=False)
+    found_indices = []
+
+    print(f"Searching for {num_samples} samples of class {target_class}...")
+
+    with temp_env.begin() as txn:
+        meta = pickle.loads(txn.get(b"__metadata__"))
+        total_available = meta["num_samples"]
+
+        # Scan until we find our 5 targets
+        for i in range(total_available):
+            byteflow = txn.get(f"{i}".encode())
+            sample = pickle.loads(byteflow)
+            if int(sample["label"]) == target_class:
+                found_indices.append(i)
+
+            if len(found_indices) == num_samples:
+                break
+    temp_env.close()
+
+    if len(found_indices) < num_samples:
+        raise ValueError(
+            f"Could only find {len(found_indices)} samples for class {target_class}"
+        )
+
+    print(f"Sanity check indices found: {found_indices}")
+
+    # 2. Create the source with ONLY these indices
+    overfit_indices = np.array(found_indices)
+    source = GalaxyLMDBDataSource(db_path, overfit_indices)
+
+    # 3. Build the infinite pipeline
+    return (
+        grain.MapDataset.source(source)
+        .repeat()  # This makes the 5 images loop forever
+        .map(process)
+        .batch(batch_size=batch_size, drop_remainder=False)
+    )
