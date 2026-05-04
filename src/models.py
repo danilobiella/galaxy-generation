@@ -131,6 +131,11 @@ class Discriminator(hk.Module):
     def __call__(self, input, is_training: bool):
         x, c = input
 
+        # Label injection
+        c_onehot = jax.nn.one_hot(c, 10)
+        c_spatial = jnp.broadcast_to(c_onehot[:, None, None, :], x.shape[:-1] + (10,))
+        x = jnp.concatenate([x, c_spatial], axis=-1)
+
         # Start with 64 filters to catch fine grain early
         x = DisResBlock(64)(x, is_training)  # 128x128
         x = DisResBlock(128)(x, is_training)  # 64x64
@@ -139,12 +144,6 @@ class Discriminator(hk.Module):
         x = SelfAttention()(x)
 
         x = DisResBlock(256)(x, is_training)  # 16x16
-
-        # Label injection
-        c_onehot = jax.nn.one_hot(c, 10)
-        c_spatial = jnp.broadcast_to(c_onehot[:, None, None, :], x.shape[:-1] + (10,))
-        x = jnp.concatenate([x, c_spatial], axis=-1)
-
         x = DisResBlock(512)(x, is_training)  # 8x8
         x = DisResBlock(512)(x, is_training)  # 4x4
 
