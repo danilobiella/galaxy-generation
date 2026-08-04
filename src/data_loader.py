@@ -1,11 +1,13 @@
 import os
 import pickle
 from dataclasses import dataclass
-from typing import Any, Dict, Tuple
+from functools import partial
+from typing import Any, Dict, Optional, Tuple
 
 import grain.python as grain
 import lmdb
 import numpy as np
+from PIL import Image
 
 
 @dataclass
@@ -44,18 +46,31 @@ class GalaxyLMDBDataSource(grain.RandomAccessDataSource):
         return {"image": sample["img"], "label": sample["label"]}
 
 
-def process(features):
-    img = features["image"].astype(np.float32) / 255.0
+def process_features(
+    features: Dict[str, Any], image_size: Optional[Tuple[int, int]] = None
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Pure function for processing and resizing."""
+    img = features["image"]
+
+    if image_size is not None:
+        target_h, target_w = image_size
+        img_pil = Image.fromarray(img)
+        img_pil = img_pil.resize((target_w, target_h), Image.Resampling.BILINEAR)
+        img = np.array(img_pil)
+
+    img = img.astype(np.float32) / 255.0
     features["image"] = (img * 2.0) - 1.0
     features["label"] = np.int32(features["label"])
+
     return (features["image"], features["label"])
 
 
-#
 def make_data_loaders(
-    db_path: str, batch_size: int, seed: int = 42
-) -> Tuple[grain.DataLoader, grain.DataLoader]:
-    # 1. Peek at the metadata once to get total count
+    db_path: str,
+    batch_size: int,
+    seed: int = 42,
+    image_size: Optional[Tuple[int, int]] = None,
+) -> grain.MapDataset:
     temp_env = lmdb.open(db_path, readonly=True, lock=False)
     with temp_env.begin() as txn:
         meta = pickle.loads(txn.get(b"__metadata__"))
@@ -63,12 +78,14 @@ def make_data_loaders(
     temp_env.close()
 
     indices = np.arange(total_samples)
-
     source = GalaxyLMDBDataSource(db_path, indices)
+
+    process_fn = partial(process_features, image_size=image_size)
+
     return (
         grain.MapDataset.source(source)
         .shuffle(seed=seed)
-        .map(process)
+        .map(process_fn)
         .batch(batch_size=batch_size, drop_remainder=True)
     )
 
@@ -76,14 +93,10 @@ def make_data_loaders(
 def make_overfit_loader(
     db_path: str,
     batch_size: int,
-    target_class: int = 5,  # Defaulting to 5 (Barred Spirals) - pick your favorite!
+    target_class: int = 5,
     num_samples: int = 5,
+    image_size: Optional[Tuple[int, int]] = None,
 ) -> grain.MapDataset:
-    """
-    Creates a loader that infinitely repeats the SAME 5 images from the SAME class.
-    Perfect for checking if the model has enough capacity to 'memorize' details.
-    """
-    # 1. Find indices belonging to the target class
     temp_env = lmdb.open(db_path, readonly=True, lock=False)
     found_indices = []
 
@@ -93,7 +106,6 @@ def make_overfit_loader(
         meta = pickle.loads(txn.get(b"__metadata__"))
         total_available = meta["num_samples"]
 
-        # Scan until we find our 5 targets
         for i in range(total_available):
             byteflow = txn.get(f"{i}".encode())
             sample = pickle.loads(byteflow)
@@ -111,14 +123,14 @@ def make_overfit_loader(
 
     print(f"Sanity check indices found: {found_indices}")
 
-    # 2. Create the source with ONLY these indices
     overfit_indices = np.array(found_indices)
     source = GalaxyLMDBDataSource(db_path, overfit_indices)
 
-    # 3. Build the infinite pipeline
+    process_fn = partial(process_features, image_size=image_size)
+
     return (
         grain.MapDataset.source(source)
-        .repeat()  # This makes the 5 images loop forever
-        .map(process)
+        .repeat()
+        .map(process_fn)
         .batch(batch_size=batch_size, drop_remainder=False)
     )
