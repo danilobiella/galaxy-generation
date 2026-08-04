@@ -22,12 +22,19 @@ IMAGE_SIZE = (64, 64)
 KAGGLE_DATA_PATH = "/kaggle/input/galaxy10-DECaLS"
 LOCAL_DATA_PATH = "data/galaxy10_decals_lmdb"
 
+# A run writes state.pkl, history.pkl, the plots and figures/ into OUTPUT_DIR.
+# On Kaggle that is the working directory, so downloading the results into a
+# local output/ reproduces exactly what a local run would have written there.
 if Path("/kaggle/input").exists():
     print("Running on Kaggle")
     data_path = KAGGLE_DATA_PATH
+    OUTPUT_DIR = Path(".")
 else:
     print("Running locally")
     data_path = LOCAL_DATA_PATH
+    OUTPUT_DIR = Path("output")
+
+FIGURES_DIR = OUTPUT_DIR / "figures"
 
 # %% -- data ---------------------------------------------------------------
 
@@ -102,17 +109,20 @@ state, history = fit_model(
     lr_schedule=lr_schedule,
     train_ds=train_data_loader,
     n_epochs=N_EPOCHS,
+    figures_dir=str(FIGURES_DIR),
 )
 
 # %% save network state and history ----------------------------------------
 
-with open("state.pkl", "wb") as f:
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+with open(OUTPUT_DIR / "state.pkl", "wb") as f:
     pickle.dump(state, f)
 
-with open("history.pkl", "wb") as f:
+with open(OUTPUT_DIR / "history.pkl", "wb") as f:
     pickle.dump(history, f)
 
 # %% -- plots --------------------------------------------------------------
 
-plot_loss(history)
-plot_gradients(history)
+plot_loss(history, str(OUTPUT_DIR / "loss_plot.png"))
+plot_gradients(history, str(OUTPUT_DIR / "gradient_plot.png"))

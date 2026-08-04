@@ -237,6 +237,7 @@ def fit_model(
     train_ds,
     n_epochs: int = 50,
     print_every: int = 100,
+    figures_dir: str = "output/figures",
 ):
     history: dict[str, list[float]] = {
         "loss": [],
@@ -267,11 +268,11 @@ def fit_model(
 
         epoch_time = time.time() - start_time
 
-        os.makedirs("figures", exist_ok=True)
+        os.makedirs(figures_dir, exist_ok=True)
         gen_fn(
             key=key,
             model_state=train_state.model_state,
-            filepath=f"figures/epoch_{epoch}.png",
+            filepath=f"{figures_dir}/epoch_{epoch}.png",
         )
 
         avg_loss = np.mean(epoch_data["loss"])
