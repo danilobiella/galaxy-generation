@@ -12,15 +12,28 @@ import optax  # type: ignore
 
 
 class ModelState(NamedTuple):
-    gen_params: hk.Params
-    dis_params: hk.Params
+    params: hk.Params
 
 
 class TrainState(NamedTuple):
     model_state: ModelState
-    gen_opt_state: optax.OptState
-    dis_opt_state: optax.OptState
+    opt_state: optax.OptState
     step: jnp.ndarray
+
+
+class DiffusionSchedule(NamedTuple):
+    T: int
+    beta: jnp.ndarray
+    alpha: jnp.ndarray
+    alpha_hat: jnp.ndarray
+
+    @classmethod
+    def create(cls, T: int = 1000, beta_start: float = 1e-4, beta_end: float = 0.02):
+        # Linear variance schedule
+        beta = jnp.linspace(beta_start, beta_end, T)
+        alpha = 1.0 - beta
+        alpha_hat = jnp.cumprod(alpha)
+        return cls(T=T, beta=beta, alpha=alpha, alpha_hat=alpha_hat)
 
 
 @jax.jit
@@ -30,46 +43,76 @@ def get_global_norm(tree):
 
 
 def make_model_fns(
-    gen: hk.Transformed,
-    dis: hk.Transformed,
-    latent_dim: int = 128,
+    unet: hk.Transformed,
+    schedule: DiffusionSchedule,
     image_shape: tuple[int, int, int] = (256, 256, 3),
 ):
     def init_model_state(rng: jax.Array) -> ModelState:
-        dummy_z = jnp.zeros((1, latent_dim))
-        dummy_label = jnp.zeros((1,), dtype=jnp.int32)
         dummy_image = jnp.zeros((1, *image_shape))
+        dummy_t = jnp.zeros((1,), dtype=jnp.int32)
 
-        gen_params = gen.init(rng, (dummy_z, dummy_label))
-        dis_params = dis.init(rng, (dummy_image, dummy_label))
-
-        return ModelState(gen_params=gen_params, dis_params=dis_params)
+        dummy_input = (dummy_image, dummy_t)
+        params = unet.init(rng, dummy_input)
+        return ModelState(params=params)
 
     def generate_and_save_images(
         key: jax.Array,
         model_state: ModelState,
         filepath: str = "generated_images.png",
     ):
-        n_rows, n_cols = 5, 10
-        fig, axes = plt.subplots(n_rows, n_cols, figsize=(20, 12))
+        n_rows, n_cols = 4, 4
+        n_samples = n_rows * n_cols
 
         @jax.jit
-        def _generate(params, input):
-            return gen.apply(params, None, input)
+        def generate_batch(start_key, params):
+            # 1. Start with pure Gaussian noise: x_T
+            init_key, loop_key = jax.random.split(start_key)
+            x_T = jax.random.normal(init_key, (n_samples, *image_shape))
 
-        for class_idx in range(n_cols):
-            key, col_key = jax.random.split(key)
-            z = jax.random.normal(col_key, (n_rows, latent_dim))
-            input = (z, jnp.full((n_rows,), class_idx))
+            # 2. Reverse process loop body
+            def body_fn(i, loop_state):
+                x, step_key = loop_state
 
-            generated_images = _generate(model_state.gen_params, input)
-            generated_images = (generated_images + 1.0) / 2.0
-            images_np = jax.device_get(generated_images)
+                # t goes from T-1 down to 0
+                t = schedule.T - 1 - i
+                t_batch = jnp.full((n_samples,), t, dtype=jnp.int32)
 
-            for row_idx in range(n_rows):
-                ax = axes[row_idx, class_idx]
-                ax.imshow(images_np[row_idx])
-                ax.axis("off")
+                # Predict noise added to this step
+                input=(x, t_batch)
+                eps_hat = unet.apply(params, None, input)
+
+                # Extract scheduled values for current timestep
+                a_t = schedule.alpha[t]
+                a_hat_t = schedule.alpha_hat[t]
+                b_t = schedule.beta[t]
+
+                # Compute the mean of the previous step
+                mu = (x - (b_t / jnp.sqrt(1.0 - a_hat_t)) * eps_hat) / jnp.sqrt(a_t)
+
+                # Add variance (unless we are at the final step t=0)
+                step_key, noise_key = jax.random.split(step_key)
+                z = jax.random.normal(noise_key, x.shape)
+                z = jnp.where(t > 0, z, jnp.zeros_like(z))
+
+                x_prev = mu + jnp.sqrt(b_t) * z
+                return x_prev, step_key
+
+            # Run the loop efficiently on device
+            x_0, _ = jax.lax.fori_loop(0, schedule.T, body_fn, (x_T, loop_key))
+            return x_0
+
+        generated_images = generate_batch(key, model_state.params)
+
+        # Scale back from [-1, 1] to [0, 1] for plotting
+        generated_images = jnp.clip((generated_images + 1.0) / 2.0, 0.0, 1.0)
+        images_np = jax.device_get(generated_images)
+
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(20, 12))
+        for idx in range(n_samples):
+            row_idx, col_idx = divmod(idx, n_cols)
+            ax = axes[row_idx, col_idx]
+            ax.imshow(images_np[idx])
+            ax.axis("off")
 
         plt.tight_layout()
         plt.savefig(filepath, bbox_inches="tight")
@@ -80,189 +123,107 @@ def make_model_fns(
 
 
 def make_train_fns(
-    gen: hk.Transformed,
-    dis: hk.Transformed,
-    gen_optimizer: optax.GradientTransformation,
-    dis_optimizer: optax.GradientTransformation,
-    latent_dim: int = 128,
-    lambda_gp: float = 20.0,
+    unet: hk.Transformed,
+    optimizer: optax.GradientTransformation,
+    schedule: DiffusionSchedule,
 ):
     def init_train_state(model_state: ModelState) -> TrainState:
-        gen_opt_state = gen_optimizer.init(model_state.gen_params)
-        dis_opt_state = dis_optimizer.init(model_state.dis_params)
+        opt_state = optimizer.init(model_state.params)
         return TrainState(
             model_state=model_state,
-            gen_opt_state=gen_opt_state,
-            dis_opt_state=dis_opt_state,
+            opt_state=opt_state,
             step=jnp.array(0, dtype=jnp.int32),
         )
 
-    @partial(jax.jit, static_argnames=["batch_size"])
-    def gen_train_step(key, state, batch_size):
-        def gen_loss_fn(gen_params, dis_params, key):
-            z_key, c_key = jax.random.split(key)
-            z = jax.random.normal(z_key, (batch_size, latent_dim))
-            c = jax.random.randint(c_key, (batch_size,), 0, 10)
-
-            gen_images = gen.apply(gen_params, None, (z, c))
-            logits = dis.apply(dis_params, None, (gen_images, c))
-            return -jnp.mean(logits)  # WGAN Gen Loss
-
-        loss, grads = jax.value_and_grad(gen_loss_fn)(
-            state.model_state.gen_params, state.model_state.dis_params, key
-        )
-        updates, new_opt_state = gen_optimizer.update(
-            grads, state.gen_opt_state, state.model_state.gen_params
-        )
-        new_gen_params = optax.apply_updates(state.model_state.gen_params, updates)
-
-        return state._replace(
-            model_state=state.model_state._replace(gen_params=new_gen_params),
-            gen_opt_state=new_opt_state,
-            step=state.step + 1,
-        ), {
-            "gen_loss": loss,
-            "gen_grad_norm": get_global_norm(grads),
-            "gen_param_norm": get_global_norm(new_gen_params),
-        }
-
     @jax.jit
-    def dis_train_step(key, state, real_input):
-        real_imgs, labels = real_input
+    def train_step(key, state, real_imgs):
+        def loss_fn(params, key):
+            t_key, noise_key = jax.random.split(key)
+            batch_size = real_imgs.shape[0]
 
-        def dis_loss_fn(dis_params, gen_params, key):
-            key_z, key_gp = jax.random.split(key)
-            z = jax.random.normal(key_z, (real_imgs.shape[0], latent_dim))
-            fake_imgs = gen.apply(gen_params, None, (z, labels))
+            # 1. Sample random timesteps
+            t = jax.random.randint(t_key, (batch_size,), 0, schedule.T)
 
-            real_logits = dis.apply(dis_params, None, (real_imgs, labels))
-            fake_logits = dis.apply(dis_params, None, (fake_imgs, labels))
+            # 2. Sample Gaussian noise to add to the images
+            epsilon = jax.random.normal(noise_key, real_imgs.shape)
 
-            w_loss = jnp.mean(fake_logits) - jnp.mean(real_logits)
+            # 3. Fetch cumulative alpha and reshape for broadcasting (B, 1, 1, 1)
+            a_hat_t = schedule.alpha_hat[t][:, None, None, None]
 
-            # --- Gradient Penalty Logic ---
-            alpha = jax.random.uniform(key_gp, (real_imgs.shape[0], 1, 1, 1))
-            interpolates = alpha * real_imgs + (1 - alpha) * fake_imgs
+            # 4. Forward process: Corrupt images to timestep t (Reparameterization Trick)
+            x_t = jnp.sqrt(a_hat_t) * real_imgs + jnp.sqrt(1.0 - a_hat_t) * epsilon
 
-            # 1. Correct the internal function to use its arguments (img, lbl)
-            def critic_forward(img, lbl):
-                # We add [None] to both to create a "batch of 1" for Haiku Conv layers
-                logits = dis.apply(dis_params, None, (img[None], lbl[None]))
-                return jnp.sum(logits)
+            # 5. Predict the added noise using the U-Net
+            input = (x_t, t)
+            eps_hat = unet.apply(params, None, input)
 
-            # 2. Tell vmap to slice BOTH arguments (in_axes=(0, 0))
-            grad_fn = jax.vmap(jax.grad(critic_forward), in_axes=(0, 0))
+            # 6. Simple MSE Loss
+            return jnp.mean(jnp.square(epsilon - eps_hat))
 
-            # 3. Pass both the interpolated images and the batch labels
-            interp_grads = grad_fn(interpolates, labels)
-
-            norms = jnp.sqrt(jnp.sum(jnp.square(interp_grads), axis=(1, 2, 3)) + 1e-8)
-            gp = jnp.mean((norms - 1.0) ** 2)
-
-            return w_loss + lambda_gp * gp, (w_loss, jnp.mean(norms))
-
-        # The rest of the function remains the same...
-        (total_loss, (w_loss, grad_norm)), grads = jax.value_and_grad(
-            dis_loss_fn, has_aux=True
-        )(state.model_state.dis_params, state.model_state.gen_params, key)
-
-        updates, new_opt_state = dis_optimizer.update(
-            grads, state.dis_opt_state, state.model_state.dis_params
+        loss, grads = jax.value_and_grad(loss_fn)(state.model_state.params, key)
+        updates, new_opt_state = optimizer.update(
+            grads, state.opt_state, state.model_state.params
         )
-        new_dis_params = optax.apply_updates(state.model_state.dis_params, updates)
+        new_params = optax.apply_updates(state.model_state.params, updates)
 
         metrics = {
-            "dis_loss": total_loss,
-            "w_loss": w_loss,
-            "dis_grad_norm": grad_norm,
-            "dis_param_norm": get_global_norm(new_dis_params),
+            "loss": loss,
+            "grad_norm": get_global_norm(grads),
+            "param_norm": get_global_norm(new_params),
         }
 
         return state._replace(
-            model_state=state.model_state._replace(dis_params=new_dis_params),
-            dis_opt_state=new_opt_state,
+            model_state=state.model_state._replace(params=new_params),
+            opt_state=new_opt_state,
             step=state.step + 1,
         ), metrics
 
-    return init_train_state, gen_train_step, dis_train_step
+    return init_train_state, train_step
 
 
 def train_epoch(
     key: jax.Array,
     train_state: TrainState,
-    gen_step,
-    dis_step,
+    train_step_fn,
     train_ds,
     epoch: int,
     n_epochs: int,
-    n_gen_steps: int,
-    n_dis_steps: int,
-    schedule,
+    lr_schedule,
     print_every: int = 100,
 ):
     n_batches = len(train_ds)
     ds_iter = iter(train_ds)
 
     epoch_metrics: dict[str, list[float]] = {
-        "dis_loss": [],
-        "w_loss": [],
-        "dis_grad_norm": [],
-        "dis_param_norm": [],
-        "gen_loss": [],
-        "gen_grad_norm": [],
-        "gen_param_norm": [],
+        "loss": [],
+        "grad_norm": [],
+        "param_norm": [],
     }
 
-    # Tracking indices for windowed averaging
-    last_d_idx = 0
-    last_g_idx = 0
+    last_idx = 0
     for i in range(n_batches):
         batch = next(ds_iter)
+        # Extract images from tuple if your dataloader returns (images, labels)
+        real_imgs = batch[0] if isinstance(batch, tuple) else batch
 
         key, step_key = jax.random.split(key)
-        train_state, d_metrics = dis_step(step_key, train_state, batch)
+        train_state, metrics = train_step_fn(step_key, train_state, real_imgs)
 
-        for k, v in d_metrics.items():
-            if k in epoch_metrics:
-                epoch_metrics[k].append(float(v))
-
-        if i % n_dis_steps == 0:
-            for _ in range(n_gen_steps):
-                key, step_key = jax.random.split(key)
-                train_state, g_metrics = gen_step(
-                    step_key, train_state, batch[0].shape[0]
-                )
-                for k, v in g_metrics.items():
-                    if k in epoch_metrics:
-                        epoch_metrics[k].append(float(v))
+        for k, v in metrics.items():
+            epoch_metrics[k].append(float(v))
 
         if i > 0 and i % print_every == 0:
-            lr = schedule(int(train_state.step))
-
-            win_dis_loss = np.mean(epoch_metrics["dis_loss"][last_d_idx:])
-            win_w_loss = np.mean(epoch_metrics["w_loss"][last_d_idx:])
-            win_d_grad = np.mean(epoch_metrics["dis_grad_norm"][last_d_idx:])
-            win_gen_loss = (
-                np.mean(epoch_metrics["gen_loss"][last_g_idx:])
-                if epoch_metrics["gen_loss"]
-                else 0.0
-            )
-            win_g_grad = (
-                np.mean(epoch_metrics["gen_grad_norm"][last_g_idx:])
-                if epoch_metrics["gen_grad_norm"]
-                else 0.0
-            )
+            lr = lr_schedule(int(train_state.step))
+            win_loss = np.mean(epoch_metrics["loss"][last_idx:])
+            win_grad = np.mean(epoch_metrics["grad_norm"][last_idx:])
 
             print(
                 f"[Ep {epoch}/{n_epochs}][B {i}/{n_batches}] "
-                f"G_L: {win_gen_loss:.4f} | "
-                f"D_L: {win_dis_loss:.4f} | W_D: {win_w_loss:.4f} | "
-                f"G_Grad: {win_g_grad:.2e} | D_Grad: {win_d_grad:.2e} | "
+                f"Loss: {win_loss:.4f} | "
+                f"Grad Norm: {win_grad:.2e} | "
                 f"LR: {lr:.2e}"
             )
-
-            last_d_idx = len(epoch_metrics["dis_loss"])
-            last_g_idx = len(epoch_metrics["gen_loss"])
+            last_idx = len(epoch_metrics["loss"])
 
     return train_state, epoch_metrics, key
 
@@ -270,28 +231,21 @@ def train_epoch(
 def fit_model(
     key: jax.Array,
     train_state: TrainState,
-    gen_step,
-    dis_step,
+    train_step_fn,
     gen_fn,
-    schedule,
+    lr_schedule,
     train_ds,
     n_epochs: int = 50,
-    n_gen_steps: int = 10,
-    n_dis_steps: int = 10,
     print_every: int = 100,
 ):
     history: dict[str, list[float]] = {
-        "dis_loss": [],
-        "w_loss": [],
-        "dis_grad_norm": [],
-        "dis_param_norm": [],
-        "gen_loss": [],
-        "gen_grad_norm": [],
-        "gen_param_norm": [],
+        "loss": [],
+        "grad_norm": [],
+        "param_norm": [],
     }
 
     print(f"\nStarting Training | Epochs: {n_epochs} | Batches: {len(train_ds)}")
-    print("-" * 110)
+    print("-" * 80)
 
     for epoch in range(1, n_epochs + 1):
         start_time = time.time()
@@ -300,14 +254,11 @@ def fit_model(
         train_state, epoch_data, key = train_epoch(
             key=subkey,
             train_state=train_state,
-            gen_step=gen_step,
-            dis_step=dis_step,
+            train_step_fn=train_step_fn,
             train_ds=train_ds,
             epoch=epoch,
             n_epochs=n_epochs,
-            n_gen_steps=n_gen_steps,
-            n_dis_steps=n_dis_steps,
-            schedule=schedule,
+            lr_schedule=lr_schedule,
             print_every=print_every,
         )
 
@@ -323,12 +274,11 @@ def fit_model(
             filepath=f"figures/epoch_{epoch}.png",
         )
 
-        avg_g = np.mean(epoch_data["gen_loss"]) if epoch_data["gen_loss"] else 0.0
-        avg_d = np.mean(epoch_data["dis_loss"])
+        avg_loss = np.mean(epoch_data["loss"])
         print(
             f"[EPOCH {epoch}] COMPLETED | Time: {epoch_time:.1f}s | "
-            f"AVG G_Loss: {avg_g:.4f} | AVG D_Loss: {avg_d:.4f}"
+            f"AVG Loss: {avg_loss:.4f}"
         )
-        print("-" * 110)
+        print("-" * 80)
 
     return train_state, history

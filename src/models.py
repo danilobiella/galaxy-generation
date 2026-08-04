@@ -1,161 +1,183 @@
+import math
+
 import haiku as hk
 import jax
 import jax.numpy as jnp
 
 
-class SelfAttention(hk.Module):
-    """Self-attention layer for coordinate-based global structure."""
+class SinusoidalPosEmb(hk.Module):
+    """Encodes the integer timestep t into a dense vector."""
+
+    def __init__(self, dim):
+        super().__init__()
+        self.dim = dim
+
+    def __call__(self, t):
+        half_dim = self.dim // 2
+        emb = math.log(10000) / (half_dim - 1)
+        emb = jnp.exp(jnp.arange(half_dim) * -emb)
+        emb = t[:, None] * emb[None, :]
+        emb = jnp.concatenate([jnp.sin(emb), jnp.cos(emb)], axis=-1)
+        return emb
+
+
+class Downsample(hk.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.dim = dim
 
     def __call__(self, x):
-        batch, h, w, channels = x.shape
-        num_pixels = h * w
-
-        # Projections
-        inter_channels = channels // 8
-        f = hk.Conv2D(inter_channels, kernel_shape=1, with_bias=False, name="f")(x)
-        g = hk.Conv2D(inter_channels, kernel_shape=1, with_bias=False, name="g")(x)
-        h_val = hk.Conv2D(channels, kernel_shape=1, with_bias=False, name="h")(x)
-
-        # Flatten for attention
-        f = jnp.reshape(f, (batch, num_pixels, inter_channels))
-        g = jnp.reshape(g, (batch, num_pixels, inter_channels))
-        h_val = jnp.reshape(h_val, (batch, num_pixels, channels))
-
-        # Attention Map
-        s = jnp.matmul(f, jnp.transpose(g, (0, 2, 1)))
-        beta = jax.nn.softmax(s, axis=-1)
-
-        # Apply to Value
-        o = jnp.matmul(beta, h_val)
-        o = jnp.reshape(o, (batch, h, w, channels))
-
-        # Gamma starts at 0.0 so the model learns to use attention slowly
-        gamma = hk.get_parameter("gamma", [], init=jnp.zeros)
-        return x + gamma * o
+        return hk.Conv2D(self.dim, kernel_shape=4, stride=2, padding="SAME")(x)
 
 
-class GenResBlock(hk.Module):
-    """Upsampling block using Resize-Convolution to avoid checkerboards."""
+class Upsample(hk.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.dim = dim
 
-    def __init__(self, out_channels, upsample=True, name=None):
-        super().__init__(name=name)
+    def __call__(self, x):
+        return hk.Conv2DTranspose(self.dim, kernel_shape=4, stride=2, padding="SAME")(x)
+
+
+class ResnetBlock(hk.Module):
+    """Standard ResNet block with timestep embedding injection."""
+
+    def __init__(self, dim, groups=8):
+        super().__init__()
+        self.dim = dim
+        self.groups = groups
+
+    def __call__(self, x, time_emb):
+        # 1. Feature processing
+        h = hk.Conv2D(self.dim, kernel_shape=3, padding="SAME")(x)
+        h = hk.GroupNorm(self.groups)(h)
+        h = jax.nn.swish(h)
+
+        # 2. Time injection (broadcast to spatial dimensions)
+        time_hidden = hk.Linear(self.dim)(jax.nn.swish(time_emb))
+        h = h + time_hidden[:, None, None, :]
+
+        # 3. Output processing
+        h = hk.Conv2D(self.dim, kernel_shape=3, padding="SAME")(h)
+        h = hk.GroupNorm(self.groups)(h)
+        h = jax.nn.swish(h)
+
+        # 4. Skip connection matching
+        if x.shape[-1] != self.dim:
+            x = hk.Conv2D(self.dim, kernel_shape=1, padding="SAME")(x)
+
+        return x + h
+
+
+class AttentionBlock(hk.Module):
+    """Standard scaled dot-product attention for the bottleneck."""
+
+    def __init__(self, dim, num_heads=4):
+        super().__init__()
+        self.dim = dim
+        self.num_heads = num_heads
+
+    def __call__(self, x):
+        B, H, W, C = x.shape
+
+        # Flatten spatial dimensions
+        x_flat = jnp.reshape(x, (B, H * W, C))
+
+        # We use Haiku's built-in MultiHeadAttention
+        attn = hk.MultiHeadAttention(
+            num_heads=self.num_heads,
+            key_size=self.dim // self.num_heads,
+            w_init=hk.initializers.VarianceScaling(1.0),
+        )
+
+        # Self-attention
+        out = attn(x_flat, x_flat, x_flat)
+
+        # Reshape back to spatial
+        out = jnp.reshape(out, (B, H, W, C))
+
+        # Residual connection
+        return x + out
+
+
+class UNet(hk.Module):
+    def __init__(
+        self,
+        dim: int = 64,
+        dim_mults: tuple[int, ...] = (1, 2, 4, 8),
+        out_channels: int = 3,
+    ):
+        super().__init__()
+        self.dim = dim
+        self.dim_mults = dim_mults
         self.out_channels = out_channels
-        self.upsample = upsample
 
-    def __call__(self, x, is_training):
-        # --- Main Path ---
-        h = x
-        if self.upsample:
-            new_shape = [x.shape[1] * 2, x.shape[2] * 2]
-            h = jax.image.resize(
-                h, shape=([x.shape[0]] + new_shape + [x.shape[3]]), method="nearest"
-            )
+    def __call__(self, input):
+        x, time = input  # <-- Using your preferred signature
 
-        h = hk.Conv2D(self.out_channels, kernel_shape=3, stride=1, padding="SAME")(h)
-        h = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)(h)
-        h = jax.nn.relu(h)
+        # 1. Timestep Embedding setup
+        time_dim = self.dim * 4
+        t_emb = SinusoidalPosEmb(self.dim)(time)
+        t_emb = hk.Linear(time_dim)(t_emb)
+        t_emb = jax.nn.swish(t_emb)
+        t_emb = hk.Linear(time_dim)(t_emb)
 
-        h = hk.Conv2D(self.out_channels, kernel_shape=3, stride=1, padding="SAME")(h)
-        h = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)(h)
+        # 2. Initial Convolution
+        x = hk.Conv2D(self.dim, kernel_shape=3, padding="SAME")(x)
+        skips = [x]
 
-        # --- Shortcut Path ---
-        shortcut = x
-        if self.upsample:
-            new_shape = [x.shape[1] * 2, x.shape[2] * 2]
-            shortcut = jax.image.resize(
-                shortcut,
-                shape=([x.shape[0]] + new_shape + [x.shape[3]]),
-                method="nearest",
-            )
+        # 3. Downsampling Path (Encoder)
+        dims = [self.dim * m for m in self.dim_mults]
+        for i, current_dim in enumerate(dims):
+            x = ResnetBlock(current_dim)(x, t_emb)
+            skips.append(x)
 
-        if shortcut.shape[-1] != self.out_channels:
-            shortcut = hk.Conv2D(
-                self.out_channels, kernel_shape=1, stride=1, padding="SAME"
-            )(shortcut)
+            x = ResnetBlock(current_dim)(x, t_emb)
+            skips.append(x)
 
-        return jax.nn.relu(h + shortcut)
+            # Key fix: Do NOT push the downsampled output to skips.
+            if i != len(dims) - 1:
+                x = Downsample(current_dim)(x)
 
+        # 4. Bottleneck
+        mid_dim = dims[-1]
+        x = ResnetBlock(mid_dim)(x, t_emb)
+        x = AttentionBlock(mid_dim)(x)
+        x = ResnetBlock(mid_dim)(x, t_emb)
 
-class DisResBlock(hk.Module):
-    """Standard Downsampling Residual Block."""
+        # 5. Upsampling Path (Decoder)
+        for i, current_dim in reversed(list(enumerate(dims))):
+            x = jnp.concatenate([x, skips.pop()], axis=-1)
+            x = ResnetBlock(current_dim)(x, t_emb)
 
-    def __init__(self, out_channels, stride=2, name=None):
-        super().__init__(name=name)
-        self.out_channels = out_channels
-        self.stride = stride
+            x = jnp.concatenate([x, skips.pop()], axis=-1)
+            x = ResnetBlock(current_dim)(x, t_emb)
 
-    def __call__(self, x, is_training):
-        h = hk.Conv2D(
-            self.out_channels, kernel_shape=3, stride=self.stride, padding="SAME"
-        )(x)
-        h = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)(h)
-        h = jax.nn.leaky_relu(h, negative_slope=0.2)
+            if i != 0:
+                x = Upsample(current_dim)(x)
 
-        h = hk.Conv2D(self.out_channels, kernel_shape=3, stride=1, padding="SAME")(h)
-        h = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)(h)
+        # Final skip connection from the initial conv
+        x = jnp.concatenate([x, skips.pop()], axis=-1)
+        x = ResnetBlock(self.dim)(x, t_emb)
 
-        shortcut = hk.Conv2D(
-            self.out_channels, kernel_shape=1, stride=self.stride, padding="SAME"
-        )(x)
-        return jax.nn.leaky_relu(h + shortcut, negative_slope=0.2)
+        # 6. Final Projection back to image channel count (predicting noise)
+        x = hk.Conv2D(self.dim, kernel_shape=3, padding="SAME")(x)
+        x = hk.GroupNorm(8)(x)
+        x = jax.nn.swish(x)
+        x = hk.Conv2D(self.out_channels, kernel_shape=1, padding="SAME")(x)
 
-
-class Generator(hk.Module):
-    def __call__(self, input, is_training: bool):
-        z, c = input
-        c_onehot = jax.nn.one_hot(c, 10)
-        x = jnp.concatenate([z, c_onehot], axis=-1)
-
-        # Start with a strong 512 base for complex concepts
-        x = hk.Linear(4 * 4 * 512)(x)
-        x = jnp.reshape(x, [-1, 4, 4, 512])
-
-        x = GenResBlock(512)(x, is_training)  # 8x8
-        x = GenResBlock(256)(x, is_training)  # 16x16
-        x = GenResBlock(256)(x, is_training)  # 32x32
-
-        x = SelfAttention()(x)
-
-        x = GenResBlock(128)(x, is_training)  # 64x64
-        x = GenResBlock(128)(x, is_training)  # 128x128
-        x = GenResBlock(64, upsample=True)(x, is_training)  # 256x256
-
-        x = hk.Conv2D(64, kernel_shape=3, stride=1, padding="SAME")(x)
-        x = jax.nn.leaky_relu(x, negative_slope=0.2)
-
-        x = hk.Conv2D(3, kernel_shape=3, stride=1, padding="SAME")(x)
-        return jax.nn.tanh(x)
-
-
-class Discriminator(hk.Module):
-    def __call__(self, input, is_training: bool):
-        x, c = input
-
-        # Label injection
-        c_onehot = jax.nn.one_hot(c, 10)
-        c_spatial = jnp.broadcast_to(c_onehot[:, None, None, :], x.shape[:-1] + (10,))
-        x = jnp.concatenate([x, c_spatial], axis=-1)
-
-        # Start with 64 filters to catch fine grain early
-        x = DisResBlock(64)(x, is_training)  # 128x128
-        x = DisResBlock(128)(x, is_training)  # 64x64
-        x = DisResBlock(256)(x, is_training)  # 32x32
-
-        x = SelfAttention()(x)
-
-        x = DisResBlock(256)(x, is_training)  # 16x16
-        x = DisResBlock(512)(x, is_training)  # 8x8
-        x = DisResBlock(512)(x, is_training)  # 4x4
-
-        x = hk.Flatten()(x)
-        return hk.Linear(1)(x)
+        return x
 
 
 def build_network():
-    def gen(z, is_training=True):
-        return Generator()(z, is_training)
+    """
+    Returns a Haiku transformed function representing the U-Net.
+    This replaces the previous GAN generator/discriminator return.
+    """
 
-    def dis(x, is_training=True):
-        return Discriminator()(x, is_training)
+    @hk.transform
+    def unet(input):
+        model = UNet(dim=64, dim_mults=(1, 2, 4, 8), out_channels=3)
+        return model(input)
 
-    return hk.transform(gen), hk.transform(dis)
+    return unet
