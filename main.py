@@ -8,18 +8,16 @@ import matplotlib.pyplot as plt
 import optax  # type: ignore
 
 from src.data_loader import make_data_loaders
-from src.models import build_network
+from src.models import build_network  # This now needs to return a U-Net
 from src.plot import plot_gradients, plot_loss
-from src.train import fit_model, make_model_fns, make_train_fns
+from src.train import DiffusionSchedule, fit_model, make_model_fns, make_train_fns
 
-BATCH_SIZE = 32
-N_EPOCHS = 30
+BATCH_SIZE = 16
+N_EPOCHS = 10
 SEED = 42
+TIMESTEPS = 1000
 DATA_PATH = "data/galaxy10_decals_lmdb"
-IMAGE_SIZE = (256, 256)
-LATENT_DIM = 128
-N_GEN_STEPS = 1
-N_DIS_STEPS = 5
+IMAGE_SIZE = (64, 64)
 
 KAGGLE_DATA_PATH = "/kaggle/input/galaxy10-DECaLS"
 LOCAL_DATA_PATH = "data/galaxy10_decals_lmdb"
@@ -34,7 +32,10 @@ else:
 # %% -- data ---------------------------------------------------------------
 
 train_data_loader = make_data_loaders(
-    db_path=data_path, batch_size=BATCH_SIZE, seed=SEED
+    db_path=data_path,
+    batch_size=BATCH_SIZE,
+    seed=SEED,
+    image_size=(IMAGE_SIZE[0], IMAGE_SIZE[1]),
 )
 
 steps_per_epoch = len(train_data_loader)
@@ -44,47 +45,46 @@ print(f"Steps per epoch: {steps_per_epoch}")
 print(f"Total training steps: {n_steps}")
 
 print("Made data loader")
-print(f"Numer of training batches: {len(train_data_loader)}")
+print(f"Number of training batches: {len(train_data_loader)}")
 print(f"Number of training samples: {len(train_data_loader) * BATCH_SIZE}")
 
-# %%
+# %% -- model and optimizer setup -------------------------------------------
 
-gen, dis = build_network()
-print("built network")
+unet = build_network()
+print("Built U-Net network")
 
-input = (jnp.zeros((BATCH_SIZE, 256, 256, 3)), jnp.zeros((BATCH_SIZE,)))
-print("Discriminator architecture:")
+# The U-Net takes (images, timesteps)
+dummy_images = jnp.zeros((BATCH_SIZE, *IMAGE_SIZE, 3))
+dummy_timesteps = jnp.zeros((BATCH_SIZE,), dtype=jnp.int32)
+unet_input = (dummy_images, dummy_timesteps)
+
+print("\nU-Net architecture:")
 print(
     hk.experimental.tabulate(
-        dis, columns=["module", "input", "output", "params_size", "params_bytes"]
-    )(input)
-)
-input = (jnp.zeros((BATCH_SIZE, LATENT_DIM)), jnp.zeros((BATCH_SIZE,)))
-print("\nGenerator architecture:")
-print(
-    hk.experimental.tabulate(
-        gen, columns=["module", "input", "output", "params_size", "params_bytes"]
-    )(input)
+        unet, columns=["module", "input", "output", "params_size", "params_bytes"]
+    )(unet_input)
 )
 
 
-def schedule(step):
+def lr_schedule(step):
+    # You can swap this for optax.warmup_cosine_decay_schedule if needed
     return 1e-4
 
-gen_optimizer = optax.adam(learning_rate=1e-4, b1=0.0, b2=0.9)
-dis_optimizer = optax.adam(learning_rate=2e-4, b1=0.0, b2=0.9)
-print("built optimizer and schedule")
 
-# %%
+optimizer = optax.adam(learning_rate=1e-4, b1=0.9, b2=0.999)
+print("Built optimizer and schedule")
 
-example_batch = next(iter(train_data_loader))
-image_shape = example_batch[0].shape
+# %% -- initialize state ---------------------------------------------------
+
+# Initialize the diffusion noise schedule
+diffusion_schedule = DiffusionSchedule.create(T=TIMESTEPS)
 
 init_model_state, generate_fn = make_model_fns(
-    gen, dis, latent_dim=LATENT_DIM, image_shape=image_shape[1:]
+    unet=unet, schedule=diffusion_schedule, image_shape=(*IMAGE_SIZE, 3)
 )
-init_train_state, gen_train_step, dis_train_step = make_train_fns(
-    gen, dis, gen_optimizer, dis_optimizer, latent_dim=LATENT_DIM
+
+init_train_state, train_step_fn = make_train_fns(
+    unet=unet, optimizer=optimizer, schedule=diffusion_schedule
 )
 
 model_state = init_model_state(rng=jax.random.PRNGKey(SEED))
@@ -97,17 +97,14 @@ key = jax.random.PRNGKey(SEED)
 state, history = fit_model(
     key=key,
     train_state=train_state,
-    gen_step=gen_train_step,
-    dis_step=dis_train_step,
+    train_step_fn=train_step_fn,
     gen_fn=generate_fn,
-    schedule=schedule,
+    lr_schedule=lr_schedule,
     train_ds=train_data_loader,
     n_epochs=N_EPOCHS,
-    n_gen_steps=N_GEN_STEPS,
-    n_dis_steps=N_DIS_STEPS,
 )
 
-# %% save network state and history
+# %% save network state and history ----------------------------------------
 
 with open("state.pkl", "wb") as f:
     pickle.dump(state, f)
@@ -115,7 +112,7 @@ with open("state.pkl", "wb") as f:
 with open("history.pkl", "wb") as f:
     pickle.dump(history, f)
 
-# %% -- plots -----------------------------------------------
+# %% -- plots --------------------------------------------------------------
 
 plot_loss(history)
 plot_gradients(history)

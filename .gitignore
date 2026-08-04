@@ -4,7 +4,7 @@ model_checkpoints/
 .kaggle_dataset/
 .kaggle_push/
 results/
-out/
+output/
 
 # pixi environments
 .pixi

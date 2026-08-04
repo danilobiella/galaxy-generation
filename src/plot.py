@@ -1,47 +1,48 @@
-import math
-
 import matplotlib.pyplot as plt
 import pandas as pd
 
+WINDOW = 100
 
-def plot_loss(history: dict):
+
+def _smooth(values: list[float], window: int = WINDOW) -> pd.Series:
+    """Rolling mean, shrinking the window for runs too short to fill it."""
+    series = pd.Series(values)
+    window = min(window, max(1, len(series) // 10))
+    return series.rolling(window=window, min_periods=1).mean()
+
+
+def plot_loss(history: dict, filepath: str = "loss_plot.png", window: int = WINDOW):
     plt.figure(figsize=(8, 4))
 
-    history["dis_loss"] = pd.Series(history["dis_loss"]).rolling(window=100).mean()
-    history["gen_loss"] = pd.Series(history["gen_loss"]).rolling(window=100).mean()
-    history["w_loss"] = pd.Series(history["w_loss"]).rolling(window=100).mean()
+    loss = history["loss"]
+    plt.plot(loss, color="darkgreen", alpha=0.15, linewidth=0.5)
+    plt.plot(_smooth(loss, window), label="loss", color="darkgreen")
 
-    plt.plot(history["dis_loss"], label="dis_loss", color="darkorange")
-    plt.plot(
-        history["w_loss"],
-        label="dis_real_loss",
-        color="darkorange",
-        linestyle="--",
-    )
-
-    plt.plot(history["gen_loss"], label="gen_loss", color="darkgreen")
-
+    plt.yscale("log")
     plt.legend()
-    plt.xlabel("epoch")
-    plt.ylabel("loss")
+    plt.xlabel("step")
+    plt.ylabel("MSE (noise prediction)")
+    plt.tight_layout()
+    plt.savefig(filepath, dpi=300)
 
-    plt.savefig("loss_plot.png", dpi=300)
 
+def plot_gradients(
+    history: dict, filepath: str = "gradient_plot.png", window: int = WINDOW
+):
+    fig, (ax_grad, ax_param) = plt.subplots(2, 1, figsize=(8, 6), sharex=True)
 
-def plot_gradients(history: dict, ax: plt.Axes = None):
-    plt.figure(figsize=(8, 4))
+    grad_norm = history["grad_norm"]
+    ax_grad.plot(grad_norm, color="darkorange", alpha=0.15, linewidth=0.5)
+    ax_grad.plot(_smooth(grad_norm, window), label="grad_norm", color="darkorange")
+    ax_grad.set_yscale("log")
+    ax_grad.set_ylabel("grad norm")
+    ax_grad.legend()
 
-    history["dis_grad_norm"] = (
-        pd.Series(history["dis_grad_norm"]).rolling(window=100).mean()
-    )
-    history["gen_grad_norm"] = (
-        pd.Series(history["gen_grad_norm"]).rolling(window=100).mean()
-    )
+    param_norm = history["param_norm"]
+    ax_param.plot(_smooth(param_norm, window), label="param_norm", color="steelblue")
+    ax_param.set_ylabel("param norm")
+    ax_param.set_xlabel("step")
+    ax_param.legend()
 
-    plt.plot(history["dis_grad_norm"], label="dis_grad_norm", color="darkorange")
-    plt.plot(history["gen_grad_norm"], label="gen_grad_norm", color="darkgreen")
-    plt.legend()
-    plt.xlabel("epoch")
-
-    plt.ylabel("norm")
-    plt.savefig("gradient_plot.png", dpi=300)
+    fig.tight_layout()
+    fig.savefig(filepath, dpi=300)
