@@ -2,7 +2,6 @@ import pickle
 
 import h5py
 import lmdb
-import numpy as np
 from tqdm import tqdm
 
 
