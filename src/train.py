@@ -1,6 +1,5 @@
 import os
 import time
-from functools import partial
 from typing import NamedTuple
 
 import haiku as hk
@@ -9,6 +8,8 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import optax  # type: ignore
+
+from src.config import FIGURES_DIR
 
 
 class ModelState(NamedTuple):
@@ -237,7 +238,7 @@ def fit_model(
     train_ds,
     n_epochs: int = 50,
     print_every: int = 100,
-    figures_dir: str = "output/figures",
+    figures_dir: str = str(FIGURES_DIR),
 ):
     history: dict[str, list[float]] = {
         "loss": [],

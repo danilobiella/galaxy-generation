@@ -1,45 +1,25 @@
 import pickle
-from pathlib import Path
 
 import haiku as hk
 import jax
 import jax.numpy as jnp
-import matplotlib.pyplot as plt
 import optax  # type: ignore
 
+from src.config import (BATCH_SIZE, DATA_PATH, FIGURES_DIR, GRADIENT_PLOT_PATH,
+                        HISTORY_PATH, IMAGE_SIZE, LEARNING_RATE, LOSS_PLOT_PATH,
+                        N_EPOCHS, ON_KAGGLE, OUTPUT_DIR, SEED, STATE_PATH,
+                        TIMESTEPS)
 from src.data_loader import make_data_loaders
 from src.models import build_network  # This now needs to return a U-Net
 from src.plot import plot_gradients, plot_loss
 from src.train import DiffusionSchedule, fit_model, make_model_fns, make_train_fns
 
-BATCH_SIZE = 16
-N_EPOCHS = 10
-SEED = 42
-TIMESTEPS = 1000
-DATA_PATH = "data/galaxy10_decals_lmdb"
-IMAGE_SIZE = (64, 64)
-
-KAGGLE_DATA_PATH = "/kaggle/input/galaxy10-DECaLS"
-LOCAL_DATA_PATH = "data/galaxy10_decals_lmdb"
-
-# A run writes state.pkl, history.pkl, the plots and figures/ into OUTPUT_DIR.
-# On Kaggle that is the working directory, so downloading the results into a
-# local output/ reproduces exactly what a local run would have written there.
-if Path("/kaggle/input").exists():
-    print("Running on Kaggle")
-    data_path = KAGGLE_DATA_PATH
-    OUTPUT_DIR = Path(".")
-else:
-    print("Running locally")
-    data_path = LOCAL_DATA_PATH
-    OUTPUT_DIR = Path("output")
-
-FIGURES_DIR = OUTPUT_DIR / "figures"
+print("Running on Kaggle" if ON_KAGGLE else "Running locally")
 
 # %% -- data ---------------------------------------------------------------
 
 train_data_loader = make_data_loaders(
-    db_path=data_path,
+    db_path=DATA_PATH,
     batch_size=BATCH_SIZE,
     seed=SEED,
     image_size=(IMAGE_SIZE[0], IMAGE_SIZE[1]),
@@ -75,10 +55,10 @@ print(
 
 def lr_schedule(step):
     # You can swap this for optax.warmup_cosine_decay_schedule if needed
-    return 1e-4
+    return LEARNING_RATE
 
 
-optimizer = optax.adam(learning_rate=1e-4, b1=0.9, b2=0.999)
+optimizer = optax.adam(learning_rate=LEARNING_RATE, b1=0.9, b2=0.999)
 print("Built optimizer and schedule")
 
 # %% -- initialize state ---------------------------------------------------
@@ -116,13 +96,13 @@ state, history = fit_model(
 
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-with open(OUTPUT_DIR / "state.pkl", "wb") as f:
+with open(STATE_PATH, "wb") as f:
     pickle.dump(state, f)
 
-with open(OUTPUT_DIR / "history.pkl", "wb") as f:
+with open(HISTORY_PATH, "wb") as f:
     pickle.dump(history, f)
 
 # %% -- plots --------------------------------------------------------------
 
-plot_loss(history, str(OUTPUT_DIR / "loss_plot.png"))
-plot_gradients(history, str(OUTPUT_DIR / "gradient_plot.png"))
+plot_loss(history, str(LOSS_PLOT_PATH))
+plot_gradients(history, str(GRADIENT_PLOT_PATH))
