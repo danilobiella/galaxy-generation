@@ -1,5 +1,5 @@
-import os
 import pickle
+import threading
 from dataclasses import dataclass
 from functools import partial
 from typing import Any, Dict, Optional, Tuple
@@ -23,17 +23,37 @@ class GalaxyLMDBDataSource(grain.RandomAccessDataSource):
                 raise ValueError("LMDB does not contain '__metadata__' key!")
             self.metadata = pickle.loads(meta_bytes)
         env.close()
-        self._env = None  # Environment will be opened lazily in workers
+        self._env = None
+        self._env_lock = threading.Lock()
 
     def __len__(self) -> int:
         return len(self.indices)
 
     def _get_env(self):
-        if self._env is None:
-            self._env = lmdb.open(
-                self.db_path, readonly=True, lock=False, readahead=False, meminit=False
-            )
+        if self._env is not None:
+            return self._env
+
+        with self._env_lock:
+            if self._env is None:
+                self._env = lmdb.open(
+                    self.db_path,
+                    readonly=True,
+                    lock=False,
+                    readahead=False,
+                    meminit=False,
+                )
         return self._env
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["_env"] = None
+        state.pop("_env_lock", None)
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._env = None
+        self._env_lock = threading.Lock()
 
     def __getitem__(self, record_key: int) -> Dict[str, Any]:
         real_idx = self.indices[record_key]
