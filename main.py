@@ -8,11 +8,12 @@ import optax  # type: ignore
 from src.config import (BATCH_SIZE, DATA_PATH, FIGURES_DIR, GRADIENT_PLOT_PATH,
                         HISTORY_PATH, IMAGE_SIZE, LEARNING_RATE, LOSS_PLOT_PATH,
                         N_EPOCHS, ON_KAGGLE, OUTPUT_DIR, SEED, STATE_PATH,
-                        TIMESTEPS)
+                        TIMESTEPS, WEIGHTS_PATH)
 from src.data_loader import make_data_loaders
 from src.models import build_network  # This now needs to return a U-Net
 from src.plot import plot_gradients, plot_loss
 from src.train import DiffusionSchedule, fit_model, make_model_fns, make_train_fns
+from src.weights import save_params
 
 print("Running on Kaggle" if ON_KAGGLE else "Running locally")
 
@@ -101,6 +102,9 @@ with open(STATE_PATH, "wb") as f:
 
 with open(HISTORY_PATH, "wb") as f:
     pickle.dump(history, f)
+
+save_params(state.model_state.params, WEIGHTS_PATH)
+print(f"Saved inference weights to: {WEIGHTS_PATH}")
 
 # %% -- plots --------------------------------------------------------------
 

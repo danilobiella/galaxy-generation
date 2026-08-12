@@ -332,6 +332,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/rope-1.14.0-pyhd8ed1ab_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/ruff-0.15.9-h7805a7d_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/s2n-1.7.1-h1cbb8d7_1.conda
+      - conda: https://conda.anaconda.org/conda-forge/linux-64/safetensors-0.8.0-py313h843e2db_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/scipy-1.17.1-py313h4b8bb8b_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/sdl2-2.32.56-h54a6638_0.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/sdl3-3.4.8-hdeec2a5_0.conda
@@ -1618,7 +1619,7 @@ packages:
 - pypi: ./
   name: galaxy-generation
   version: 0.1.0
-  sha256: 5ec7c1f9a9fc9dc5331ba3565cc723b95a067f78fdcf2c00aa3226b537b407ba
+  sha256: afbfe83927bac9d6f12d47939e7b126cde702794448ecdbe4d16e81494432336
   requires_dist:
   - imageio[ffmpeg]
   requires_python: '>=3.11'
@@ -4941,6 +4942,22 @@ packages:
   purls: []
   size: 395083
   timestamp: 1773251675551
+- conda: https://conda.anaconda.org/conda-forge/linux-64/safetensors-0.8.0-py313h843e2db_0.conda
+  sha256: a0cb20b8c3dcd301fd4ed06de9748cdbfa9960950e0142b9b2f55a73c7af3e0a
+  md5: 7cbe2e9f6758b3fa12e9e8d3a2928432
+  depends:
+  - python
+  - libgcc >=14
+  - __glibc >=2.17,<3.0.a0
+  - python_abi 3.13.* *_cp313
+  constrains:
+  - __glibc >=2.17
+  license: Apache-2.0
+  license_family: APACHE
+  purls:
+  - pkg:pypi/safetensors?source=hash-mapping
+  size: 502312
+  timestamp: 1781179693481
 - conda: https://conda.anaconda.org/conda-forge/linux-64/scipy-1.17.1-py313h4b8bb8b_0.conda
   sha256: fdd92a119a2a5f89d6e549a326adcb008f5046ea5034a9af409e97b7e20e6f06
   md5: ec81bc03787968decae6765c7f61b7cf
