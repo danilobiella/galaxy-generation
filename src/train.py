@@ -9,8 +9,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import optax  # type: ignore
 
-from src.config import FIGURES_DIR
-
 
 class ModelState(NamedTuple):
     params: hk.Params
@@ -238,7 +236,7 @@ def fit_model(
     train_ds,
     n_epochs: int = 50,
     print_every: int = 100,
-    figures_dir: str = str(FIGURES_DIR),
+    figures_dir: str = "output/figures",
 ):
     history: dict[str, list[float]] = {
         "loss": [],

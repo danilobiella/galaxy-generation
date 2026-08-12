@@ -397,6 +397,7 @@ environments:
       - conda: https://conda.anaconda.org/conda-forge/noarch/zipp-3.23.0-pyhcf101f3_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/zlib-ng-2.3.3-hceb46e0_1.conda
       - conda: https://conda.anaconda.org/conda-forge/linux-64/zstd-1.5.7-hb78ec9c_6.conda
+      - pypi: git+https://github.com/danilobiella/kaggle-bundler.git#ea954e9ed71fe10b17cc8b3cd92a53bf8a29a6c5
       - pypi: ./
 packages:
 - conda: https://conda.anaconda.org/conda-forge/linux-64/_openmp_mutex-4.5-20_gnu.conda
@@ -1617,7 +1618,7 @@ packages:
 - pypi: ./
   name: galaxy-generation
   version: 0.1.0
-  sha256: 77873c342fde360ca0676bc4b0017ba3be4477b92295c340be3818a3ff45a1f4
+  sha256: 5ec7c1f9a9fc9dc5331ba3565cc723b95a067f78fdcf2c00aa3226b537b407ba
   requires_dist:
   - imageio[ffmpeg]
   requires_python: '>=3.11'
@@ -2137,6 +2138,10 @@ packages:
   - pkg:pypi/kaggle?source=hash-mapping
   size: 72605
   timestamp: 1770320277708
+- pypi: git+https://github.com/danilobiella/kaggle-bundler.git#ea954e9ed71fe10b17cc8b3cd92a53bf8a29a6c5
+  name: kaggle-bundler
+  version: 0.1.0
+  requires_python: '>=3.11'
 - conda: https://conda.anaconda.org/conda-forge/noarch/kagglesdk-0.1.15-pyhcf101f3_0.conda
   sha256: d930c10c6eb15434eed901294b7edea4a8577b4bba72c9e0e1c23c31f111b328
   md5: 01b15b9c33fa90779aace04c0eeca559

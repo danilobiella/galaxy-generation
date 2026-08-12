@@ -9,12 +9,17 @@ version = "0.1.0"
 build-backend = "hatchling.build"
 requires = ["hatchling"]
 
+[tool.hatch.build.targets.wheel]
+only-include = ["src"]
+sources = ["src"]
+
 [tool.pixi.workspace]
 channels = ["conda-forge"]
 platforms = ["linux-64"]
 
 [tool.pixi.pypi-dependencies]
 galaxy_generation = { path = ".", editable = true }
+kaggle-bundler = { git = "https://github.com/danilobiella/kaggle-bundler.git" }
 
 [tool.pixi.dependencies]
 jaxlib = { version = ">=0.6.0,<0.7.0", build = "*cuda12*" }
@@ -45,8 +50,8 @@ imageio-ffmpeg = ">=0.6.0,<0.7"
 [tool.pixi.system-requirements]
 cuda = "12"
 
-[tool.setuptools.packages.find]
-where = ["."]
+[tool.kaggle_bundler]
+entrypoint = "main.py"
 include = ["src"]
-exclude = []
-namespaces = false
+pip_deps = ["dm-haiku", "lmdb"]
+output = ".kaggle_push/script.py"

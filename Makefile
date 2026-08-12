@@ -7,7 +7,8 @@ BIN_DATA_FILES := data/galaxy10_decals_lmdb
 KAGGLE_DATASET_STAGING := .kaggle_dataset
 KAGGLE_STAGING := .kaggle_push
 
-.PHONY: data kaggle-dataset-stage kaggle-dataset-push kaggle-dataset-clean
+.PHONY: data kaggle-dataset-stage kaggle-dataset-push kaggle-dataset-clean \
+        kaggle-stage kaggle-push kaggle-clean
 
 data: $(BIN_DATA_FILES)
 	@echo "$(GREEN)Data preparation complete!$(RESET)"
@@ -39,18 +40,14 @@ kaggle-dataset-clean:
 	@echo "$(GREEN)Cleaning dataset directory...$(RESET)"
 	rm -rf $(KAGGLE_DATASET_STAGING)
 
-# Upload kernel on kaggle
 kaggle-stage: kaggle-clean
 	@echo "$(GREEN)Staging files for Kaggle...$(RESET)"
-	mkdir -p $(KAGGLE_STAGING)
-	cp kernel-metadata.json $(KAGGLE_STAGING)/
-	python bundler.py
+	kaggle-bundler build
 
-# Push kernel to Kaggle
 kaggle-push: kaggle-stage
 	@echo "$(GREEN)Pushing to Kaggle...$(RESET)"
 	kaggle kernels push -p $(KAGGLE_STAGING)
 
 kaggle-clean:
 	@echo "$(GREEN)Cleaning staging directory...$(RESET)"
-	rm -rf $(KAGGLE_STAGING)
+	kaggle-bundler clean
