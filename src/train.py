@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import os
 import time
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 import haiku as hk
 import jax
@@ -8,6 +10,9 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import numpy as np
 import optax  # type: ignore
+
+if TYPE_CHECKING:
+    from diffusion import DiffusionSchedule
 
 
 class ModelState(NamedTuple):
@@ -18,21 +23,6 @@ class TrainState(NamedTuple):
     model_state: ModelState
     opt_state: optax.OptState
     step: jnp.ndarray
-
-
-class DiffusionSchedule(NamedTuple):
-    T: int
-    beta: jnp.ndarray
-    alpha: jnp.ndarray
-    alpha_hat: jnp.ndarray
-
-    @classmethod
-    def create(cls, T: int = 1000, beta_start: float = 1e-4, beta_end: float = 0.02):
-        # Linear variance schedule
-        beta = jnp.linspace(beta_start, beta_end, T)
-        alpha = 1.0 - beta
-        alpha_hat = jnp.cumprod(alpha)
-        return cls(T=T, beta=beta, alpha=alpha, alpha_hat=alpha_hat)
 
 
 @jax.jit

@@ -9,8 +9,8 @@ import jax.numpy as jnp
 import numpy as np
 
 from config import DDIM_ETA, DDIM_STEPS, IMAGE_SIZE, SAMPLER, TIMESTEPS, WEIGHTS_PATH
+from diffusion import DiffusionSchedule
 from models import build_network
-from train import DiffusionSchedule
 from weights import load_params
 
 SAMPLERS = ("ddpm", "ddim")

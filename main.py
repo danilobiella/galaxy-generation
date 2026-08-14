@@ -12,7 +12,8 @@ from src.config import (BATCH_SIZE, DATA_PATH, FIGURES_DIR, GRADIENT_PLOT_PATH,
 from src.data_loader import make_data_loaders
 from src.models import build_network  # This now needs to return a U-Net
 from src.plot import plot_gradients, plot_loss
-from src.train import DiffusionSchedule, fit_model, make_model_fns, make_train_fns
+from src.diffusion import DiffusionSchedule
+from src.train import fit_model, make_model_fns, make_train_fns
 from src.weights import save_params
 
 print("Running on Kaggle" if ON_KAGGLE else "Running locally")
