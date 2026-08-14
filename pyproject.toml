@@ -45,6 +45,9 @@ imageio = ">=2.37.0,<3"
 ffmpeg = ">=8.0.1,<9"
 imageio-ffmpeg = ">=0.6.0,<0.7"
 safetensors = ">=0.8.0,<0.9"
+fastapi = ">=0.141.1,<0.142"
+uvicorn = ">=0.52.1,<0.53"
+pillow = ">=12.3.0,<13"
 
 [tool.pixi.tasks]
 

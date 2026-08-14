@@ -7,8 +7,11 @@ BIN_DATA_FILES := data/galaxy10_decals_lmdb
 KAGGLE_DATASET_STAGING := .kaggle_dataset
 KAGGLE_STAGING := .kaggle_push
 
+API_HOST := 127.0.0.1
+API_PORT := 8000
+
 .PHONY: data kaggle-dataset-stage kaggle-dataset-push kaggle-dataset-clean \
-        kaggle-stage kaggle-push kaggle-clean
+        kaggle-stage kaggle-push kaggle-clean api api-cpu
 
 data: $(BIN_DATA_FILES)
 	@echo "$(GREEN)Data preparation complete!$(RESET)"
@@ -51,3 +54,13 @@ kaggle-push: kaggle-stage
 kaggle-clean:
 	@echo "$(GREEN)Cleaning staging directory...$(RESET)"
 	kaggle-bundler clean
+
+# Serve the model
+api:
+	@echo "$(GREEN)Starting API on $(API_HOST):$(API_PORT)...$(RESET)"
+	uvicorn api:app --host $(API_HOST) --port $(API_PORT)
+
+# Same, forced onto CPU (what the deployed container will look like)
+api-cpu:
+	@echo "$(GREEN)Starting API on CPU at $(API_HOST):$(API_PORT)...$(RESET)"
+	JAX_PLATFORMS=cpu uvicorn api:app --host $(API_HOST) --port $(API_PORT)

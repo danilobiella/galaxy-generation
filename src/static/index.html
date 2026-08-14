@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Galaxy Generation</title>
+<style>
+  :root {
+    --bg: #07080d;
+    --tile: #000;
+    --text: #e8eaf0;
+    --muted: #868c9d;
+    --size: 160px;
+    --gap: 8px;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding: 2.5rem 1.5rem 6rem;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  .wrap { max-width: 1040px; margin: 0 auto; }
+
+  h1 {
+    margin: 0 0 .35rem;
+    font-size: 1.6rem;
+    font-weight: 600;
+    letter-spacing: -.01em;
+  }
+
+  header p { margin: 0 0 2rem; color: var(--muted); }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, var(--size));
+    gap: var(--gap);
+    justify-content: center;
+  }
+
+  .tile {
+    width: var(--size);
+    height: var(--size);
+    background: var(--tile);
+  }
+
+  .tile img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    opacity: 0;
+    transition: opacity .4s ease;
+  }
+
+  .tile img.loaded { opacity: 1; }
+
+  #sentinel { height: 1px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Galaxy Generation</h1>
+    <p>Images sampled from a diffusion model trained on Galaxy10 DECaLS.</p>
+  </header>
+
+  <div class="grid" id="grid"></div>
+  <div id="sentinel"></div>
+
+</div>
+
+<script>
+const MAX_BATCH = 10;
+const STEPS = 20;
+const STALL_TIMEOUT = 90000;
+
+const grid = document.getElementById("grid");
+const sentinel = document.getElementById("sentinel");
+
+let loading = false;
+
+function columnCount() {
+  const tracks = getComputedStyle(grid).gridTemplateColumns;
+  const count = tracks.split(/\s+/).filter((t) => t && t !== "none").length;
+  return Math.min(Math.max(count, 1), MAX_BATCH);
+}
+
+function addTile(galaxy) {
+  const tile = document.createElement("div");
+  tile.className = "tile";
+
+  const img = document.createElement("img");
+  img.alt = "generated galaxy";
+  img.addEventListener("load", () => img.classList.add("loaded"));
+
+  tile.append(img);
+  grid.append(tile);
+
+  return new Promise((resolve) => {
+    img.addEventListener("load", resolve);
+    img.addEventListener("error", resolve);
+    setTimeout(resolve, STALL_TIMEOUT);
+    img.src = galaxy.url;
+  });
+}
+
+async function loadBatch() {
+  if (loading) return;
+  loading = true;
+
+  try {
+    const params = new URLSearchParams({ n: columnCount(), steps: STEPS });
+    const response = await fetch("/galaxies?" + params);
+    if (!response.ok) throw new Error("HTTP " + response.status);
+
+    const data = await response.json();
+    await Promise.all(data.galaxies.map(addTile));
+  } catch (err) {
+    console.error("galaxy batch failed:", err);
+  } finally {
+    loading = false;
+    fillViewport();
+  }
+}
+
+function fillViewport() {
+  if (!loading && sentinel.getBoundingClientRect().top < window.innerHeight) {
+    loadBatch();
+  }
+}
+
+new IntersectionObserver((entries) => {
+  if (entries.some((entry) => entry.isIntersecting)) loadBatch();
+}, { rootMargin: "300px" }).observe(sentinel);
+
+loadBatch();
+</script>
+</body>
+</html>
