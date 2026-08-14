@@ -12,7 +12,7 @@ import numpy as np
 import optax  # type: ignore
 
 if TYPE_CHECKING:
-    from diffusion import DiffusionSchedule
+    from diffusion import DiffusionSchedule, Samplers
 
 
 class ModelState(NamedTuple):
@@ -33,8 +33,9 @@ def get_global_norm(tree):
 
 def make_model_fns(
     unet: hk.Transformed,
-    schedule: DiffusionSchedule,
+    samplers: Samplers,
     image_shape: tuple[int, int, int] = (256, 256, 3),
+    sample_steps: int = 20,
 ):
     def init_model_state(rng: jax.Array) -> ModelState:
         dummy_image = jnp.zeros((1, *image_shape))
@@ -52,49 +53,11 @@ def make_model_fns(
         n_rows, n_cols = 4, 4
         n_samples = n_rows * n_cols
 
-        @jax.jit
-        def generate_batch(start_key, params):
-            # 1. Start with pure Gaussian noise: x_T
-            init_key, loop_key = jax.random.split(start_key)
-            x_T = jax.random.normal(init_key, (n_samples, *image_shape))
+        latents = samplers.run_ddim(
+            n_samples, sample_steps, True, model_state.params, key, 0.0
+        )
 
-            # 2. Reverse process loop body
-            def body_fn(i, loop_state):
-                x, step_key = loop_state
-
-                # t goes from T-1 down to 0
-                t = schedule.T - 1 - i
-                t_batch = jnp.full((n_samples,), t, dtype=jnp.int32)
-
-                # Predict noise added to this step
-                input=(x, t_batch)
-                eps_hat = unet.apply(params, None, input)
-
-                # Extract scheduled values for current timestep
-                a_t = schedule.alpha[t]
-                a_hat_t = schedule.alpha_hat[t]
-                b_t = schedule.beta[t]
-
-                # Compute the mean of the previous step
-                mu = (x - (b_t / jnp.sqrt(1.0 - a_hat_t)) * eps_hat) / jnp.sqrt(a_t)
-
-                # Add variance (unless we are at the final step t=0)
-                step_key, noise_key = jax.random.split(step_key)
-                z = jax.random.normal(noise_key, x.shape)
-                z = jnp.where(t > 0, z, jnp.zeros_like(z))
-
-                x_prev = mu + jnp.sqrt(b_t) * z
-                return x_prev, step_key
-
-            # Run the loop efficiently on device
-            x_0, _ = jax.lax.fori_loop(0, schedule.T, body_fn, (x_T, loop_key))
-            return x_0
-
-        generated_images = generate_batch(key, model_state.params)
-
-        # Scale back from [-1, 1] to [0, 1] for plotting
-        generated_images = jnp.clip((generated_images + 1.0) / 2.0, 0.0, 1.0)
-        images_np = jax.device_get(generated_images)
+        images_np = jax.device_get(jnp.clip((latents + 1.0) / 2.0, 0.0, 1.0))
 
         fig, axes = plt.subplots(n_rows, n_cols, figsize=(20, 12))
         for idx in range(n_samples):

@@ -108,7 +108,6 @@ def sample_sheet(run_dir: Path, filepath: Path, max_panels: int = 12) -> bool:
     n_cols = min(3, len(figures))
     n_rows = int(np.ceil(len(figures) / n_cols))
 
-    # Match the panel shape to the saved grids so they are not stretched.
     with Image.open(figures[0]) as probe:
         aspect = probe.width / probe.height
     panel_w = 5.0
@@ -125,7 +124,6 @@ def sample_sheet(run_dir: Path, filepath: Path, max_panels: int = 12) -> bool:
         ax.set_visible(True)
         with Image.open(path) as img:
             ax.imshow(img)
-        # Keep the frame (not axis("off")) so adjacent grids stay distinguishable.
         ax.set_xticks([])
         ax.set_yticks([])
         for spine in ax.spines.values():
