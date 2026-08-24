@@ -1,0 +1,8 @@
+jax[cpu]>=0.6.0,<0.7.0
+dm-haiku>=0.0.16,<0.0.17
+flax>=0.10.0
+safetensors>=0.8.0,<0.9
+numpy>=2.0
+fastapi>=0.140
+uvicorn>=0.50
+pillow>=11.0

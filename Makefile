@@ -10,8 +10,12 @@ KAGGLE_STAGING := .kaggle_push
 API_HOST := 127.0.0.1
 API_PORT := 8000
 
+DOCKER_IMAGE := galaxy-api
+HF_SPACE := galaxy-generation
+
 .PHONY: data kaggle-dataset-stage kaggle-dataset-push kaggle-dataset-clean \
-        kaggle-stage kaggle-push kaggle-clean api api-cpu
+        kaggle-stage kaggle-push kaggle-clean api api-cpu \
+        docker-build docker-run hf-check hf-deploy
 
 data: $(BIN_DATA_FILES)
 	@echo "$(GREEN)Data preparation complete!$(RESET)"
@@ -64,3 +68,12 @@ api:
 api-cpu:
 	@echo "$(GREEN)Starting API on CPU at $(API_HOST):$(API_PORT)...$(RESET)"
 	JAX_PLATFORMS=cpu uvicorn api:app --host $(API_HOST) --port $(API_PORT)
+
+# Build the inference image exactly as Hugging Face will
+docker-build:
+	@echo "$(GREEN)Building $(DOCKER_IMAGE)...$(RESET)"
+	docker build -t $(DOCKER_IMAGE) .
+
+docker-run: docker-build
+	@echo "$(GREEN)Running $(DOCKER_IMAGE) on :7860...$(RESET)"
+	docker run --rm -p 7860:7860 $(DOCKER_IMAGE)
