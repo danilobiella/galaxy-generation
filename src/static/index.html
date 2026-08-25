@@ -10,6 +10,8 @@
     --tile: #000;
     --text: #e8eaf0;
     --muted: #868c9d;
+    --line: #1c1f2b;
+    --accent: #6ea8ff;
     --size: 160px;
     --gap: 8px;
   }
@@ -33,7 +35,84 @@
     letter-spacing: -.01em;
   }
 
-  header p { margin: 0 0 2rem; color: var(--muted); }
+  header p { margin: 0 0 1.5rem; color: var(--muted); }
+
+  .controls {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    margin-bottom: 1.5rem;
+    padding: .8rem 0 .7rem;
+    background: rgba(7, 8, 13, .94);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .controls[hidden] { display: none; }
+
+  .chips {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    padding-bottom: 6px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--line) transparent;
+    transition: opacity .2s ease;
+  }
+
+  .chips.inert { opacity: .35; }
+
+  .chip {
+    flex: none;
+    padding: .3rem .7rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 12.5px;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: color .15s ease, border-color .15s ease, background .15s ease;
+  }
+
+  .chip:hover { color: var(--text); border-color: #2c3142; }
+
+  .chip[aria-pressed="true"] {
+    background: var(--accent);
+    border-color: transparent;
+    color: #06070c;
+    font-weight: 500;
+  }
+
+  .slider-row {
+    display: flex;
+    align-items: center;
+    gap: .65rem;
+    margin-top: .7rem;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+
+  .slider-row input[type="range"] {
+    flex: 1;
+    max-width: 260px;
+    accent-color: var(--accent);
+  }
+
+  #guidanceValue {
+    min-width: 2.2rem;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .hint { flex: 1; min-width: 0; }
+
+  .status {
+    margin: 0 0 1.25rem;
+    color: var(--muted);
+    font-size: 13px;
+  }
 
   .grid {
     display: grid;
@@ -58,6 +137,24 @@
 
   .tile img.loaded { opacity: 1; }
 
+  .divider {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    margin: 1.1rem 0 .3rem;
+    color: var(--muted);
+    font-size: 12px;
+    scroll-margin-top: 7rem;
+  }
+
+  .divider::before,
+  .divider::after {
+    content: "";
+    flex: 1;
+    border-top: 1px solid var(--line);
+  }
+
   #sentinel { height: 1px; }
 </style>
 </head>
@@ -69,25 +166,78 @@
     <p>Images sampled from a diffusion model trained on Galaxy10 DECaLS.</p>
   </header>
 
+  <div class="controls" id="controls" hidden>
+    <div class="chips" id="chips"></div>
+    <div class="slider-row">
+      <label for="guidance">Guidance</label>
+      <input type="range" id="guidance" min="0" max="8" step="0.5">
+      <output id="guidanceValue"></output>
+      <span class="hint" id="hint"></span>
+    </div>
+  </div>
+
+  <p class="status" id="status" hidden></p>
+
   <div class="grid" id="grid"></div>
   <div id="sentinel"></div>
 
 </div>
 
 <script>
-const MAX_BATCH = 10;
 const STEPS = 20;
 const STALL_TIMEOUT = 90000;
 
 const grid = document.getElementById("grid");
 const sentinel = document.getElementById("sentinel");
+const controls = document.getElementById("controls");
+const chips = document.getElementById("chips");
+const slider = document.getElementById("guidance");
+const guidanceValue = document.getElementById("guidanceValue");
+const hint = document.getElementById("hint");
 
+const HEALTH_POLL_MS = 1500;
+const HEALTH_TIMEOUT_MS = 360000;
+const RETRY_MS = 2000;
+
+const status = document.getElementById("status");
+
+const state = { classId: null, guidance: 2, maxBatch: 10, classNames: [] };
+
+let ready = false;
 let loading = false;
+let queued = false;
+let lastLabel = null;
+let scrollToNextSection = false;
+
+function sectionLabel(settings) {
+  if (settings.guidance === 0) return "unconditional · w = 0";
+  const name =
+    settings.classId === null
+      ? "mixed morphologies"
+      : state.classNames[settings.classId];
+  return name + " · w = " + settings.guidance.toFixed(1);
+}
 
 function columnCount() {
   const tracks = getComputedStyle(grid).gridTemplateColumns;
   const count = tracks.split(/\s+/).filter((t) => t && t !== "none").length;
-  return Math.min(Math.max(count, 1), MAX_BATCH);
+  return Math.min(Math.max(count, 1), state.maxBatch);
+}
+
+function markSection(settings) {
+  const label = sectionLabel(settings);
+  if (label === lastLabel) return;
+  lastLabel = label;
+
+  const divider = document.createElement("div");
+  divider.className = "divider";
+  divider.textContent = label;
+  grid.append(divider);
+
+  if (scrollToNextSection) {
+    scrollToNextSection = false;
+    divider.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 }
 
 function addTile(galaxy) {
@@ -95,7 +245,8 @@ function addTile(galaxy) {
   tile.className = "tile";
 
   const img = document.createElement("img");
-  img.alt = "generated galaxy";
+  img.alt = galaxy.class_name ? galaxy.class_name + " galaxy" : "generated galaxy";
+  if (galaxy.class_name) img.title = galaxy.class_name;
   img.addEventListener("load", () => img.classList.add("loaded"));
 
   tile.append(img);
@@ -110,21 +261,35 @@ function addTile(galaxy) {
 }
 
 async function loadBatch() {
-  if (loading) return;
+  if (!ready || loading) return;
   loading = true;
+
+  const settings = { classId: state.classId, guidance: state.guidance };
 
   try {
     const params = new URLSearchParams({ n: columnCount(), steps: STEPS });
+    if (state.classNames.length) {
+      params.set("guidance", settings.guidance);
+      if (settings.classId !== null) params.set("class", settings.classId);
+    }
+
     const response = await fetch("/galaxies?" + params);
     if (!response.ok) throw new Error("HTTP " + response.status);
 
     const data = await response.json();
+    markSection(settings);
     await Promise.all(data.galaxies.map(addTile));
   } catch (err) {
     console.error("galaxy batch failed:", err);
+    await sleep(RETRY_MS);
   } finally {
     loading = false;
-    fillViewport();
+    if (queued) {
+      queued = false;
+      loadBatch();
+    } else {
+      fillViewport();
+    }
   }
 }
 
@@ -134,11 +299,120 @@ function fillViewport() {
   }
 }
 
+function requestBatch() {
+  scrollToNextSection = true;
+  if (loading) queued = true;
+  else loadBatch();
+}
+
+function syncControls() {
+  guidanceValue.textContent = state.guidance.toFixed(1);
+  chips.classList.toggle("inert", state.guidance === 0);
+  hint.textContent =
+    state.guidance === 0
+      ? "the class is ignored at w = 0"
+      : state.guidance < 1
+        ? "below 1 the class is only a nudge"
+        : state.guidance > 4
+          ? "strong class fidelity, less variety"
+          : "";
+
+  for (const chip of chips.children) {
+    const value = chip.dataset.classId;
+    const selected =
+      value === "" ? state.classId === null : Number(value) === state.classId;
+    chip.setAttribute("aria-pressed", String(selected));
+  }
+}
+
+function buildChips() {
+  const entries = [["", "Any"]].concat(
+    state.classNames.map((name, index) => [String(index), name])
+  );
+
+  for (const [value, name] of entries) {
+    const chip = document.createElement("button");
+    chip.className = "chip";
+    chip.type = "button";
+    chip.dataset.classId = value;
+    chip.textContent = name;
+    chip.addEventListener("click", () => {
+      state.classId = value === "" ? null : Number(value);
+      syncControls();
+      requestBatch();
+    });
+    chips.append(chip);
+  }
+}
+
+slider.addEventListener("input", () => {
+  state.guidance = Number(slider.value);
+  syncControls();
+});
+
+slider.addEventListener("change", requestBatch);
+
 new IntersectionObserver((entries) => {
   if (entries.some((entry) => entry.isIntersecting)) loadBatch();
 }, { rootMargin: "300px" }).observe(sentinel);
 
-loadBatch();
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function setStatus(text) {
+  status.textContent = text ?? "";
+  status.hidden = !text;
+}
+
+async function waitForModel() {
+  const deadline = Date.now() + HEALTH_TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch("/health");
+      if (response.ok) {
+        const health = await response.json();
+        if (health.status === "ok") return health;
+        setStatus(`warming up the model on ${health.device.toUpperCase()} …`);
+      }
+    } catch (err) {
+      console.error("health check failed:", err);
+      setStatus("waiting for the server …");
+    }
+    await sleep(HEALTH_POLL_MS);
+  }
+
+  return null;
+}
+
+async function start() {
+  setStatus("warming up the model …");
+  const health = await waitForModel();
+
+  if (health === null) {
+    setStatus("the model did not finish loading; reload to retry");
+    return;
+  }
+
+  setStatus(null);
+  state.maxBatch = health.max_batch ?? state.maxBatch;
+  ready = true;
+
+  if (health.conditional) {
+    state.classNames = health.class_names ?? [];
+    state.guidance = health.default_guidance ?? state.guidance;
+    slider.max = health.max_guidance ?? slider.max;
+    slider.value = state.guidance;
+    buildChips();
+    syncControls();
+    controls.hidden = false;
+  }
+
+  loadBatch();
+}
+
+start();
 </script>
 </body>
 </html>

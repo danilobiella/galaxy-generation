@@ -22,15 +22,19 @@ from PIL import Image
 from config import (
     API_MAX_BATCH,
     API_STEPS,
+    CLASS_NAMES,
     DDIM_ETA,
     DDIM_STEPS,
+    GUIDANCE_SCALE,
     IMAGE_SIZE,
+    NUM_CLASSES,
     WEIGHTS_PATH,
 )
 from generate import load_generator, random_seed
 from logs import setup_logging
 
 SAMPLER = "ddim"
+MAX_GUIDANCE = 8.0
 IMMUTABLE = "public, max-age=31536000, immutable"
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -106,16 +110,41 @@ def validate_steps(steps: int) -> int:
     return steps
 
 
+def resolve_class(generator, class_id: int | None, seed: int) -> int | None:
+    """Turn "any" into a concrete class, so the answer stays a function of `seed`.
+
+    Leaving it unresolved would make the ETag lie: two requests with the same
+    seed could return different images.
+    """
+    if not generator.conditional:
+        if class_id is not None:
+            raise HTTPException(
+                status_code=422,
+                detail="This checkpoint is unconditional; `class` is not supported.",
+            )
+        return None
+
+    if class_id is not None:
+        return class_id
+
+    return int(np.random.default_rng(seed).integers(NUM_CLASSES))
+
+
 @app.get("/health")
 def health() -> dict:
+    generator = _state.get("generator")
     return {
-        "status": "ok" if "generator" in _state else "loading",
+        "status": "ok" if generator is not None else "loading",
         "device": jax.devices()[0].platform,
         "image_size": list(IMAGE_SIZE),
         "sampler": SAMPLER,
         "default_steps": DDIM_STEPS,
         "allowed_steps": list(API_STEPS),
         "max_batch": API_MAX_BATCH,
+        "conditional": bool(generator is not None and generator.conditional),
+        "class_names": list(CLASS_NAMES),
+        "default_guidance": GUIDANCE_SCALE,
+        "max_guidance": MAX_GUIDANCE,
     }
 
 
@@ -128,19 +157,37 @@ def galaxy(
     seed: int | None = Query(None, ge=0, lt=2**31),
     steps: int = Query(DDIM_STEPS),
     eta: float = Query(DDIM_ETA, ge=0.0, le=1.0),
+    class_id: int | None = Query(None, alias="class", ge=0, lt=NUM_CLASSES),
+    guidance: float = Query(GUIDANCE_SCALE, ge=0.0, le=MAX_GUIDANCE),
 ) -> Response:
-    """One galaxy as a PNG. Deterministic in `seed` when eta=0."""
+    """One galaxy as a PNG. Deterministic in `seed` when eta=0.
+
+    `class` selects a morphology, or picks one from the seed when omitted.
+    `guidance` is the classifier-free scale: 0 ignores the class entirely and
+    reproduces the unconditional model, 1 is plain conditional sampling, higher
+    trades diversity for class fidelity.
+    """
     validate_steps(steps)
     generator = get_generator()
     seed = random_seed() if seed is None else seed
+    class_id = resolve_class(generator, class_id, seed)
 
-    logger.info(f"request  seed={seed} steps={steps} eta={eta}")
+    logger.info(
+        f"request  seed={seed} steps={steps} eta={eta} "
+        f"class={class_id} guidance={guidance}"
+    )
     requested = time.perf_counter()
 
     with _device_lock:
         acquired = time.perf_counter()
         images = generator.generate(
-            n_samples=1, seed=seed, sampler=SAMPLER, steps=steps, eta=eta
+            n_samples=1,
+            seed=seed,
+            sampler=SAMPLER,
+            steps=steps,
+            eta=eta,
+            labels=class_id,
+            guidance=guidance,
         )
         sampled = time.perf_counter()
 
@@ -154,15 +201,16 @@ def galaxy(
         f"encode {done - sampled:.2f}s, {len(png) / 1024:.1f} KB)"
     )
 
-    return Response(
-        content=png,
-        media_type="image/png",
-        headers={
-            "Cache-Control": IMMUTABLE if eta == 0.0 else "no-store",
-            "ETag": f'"{SAMPLER}-{steps}-{eta}-{seed}"',
-            "X-Galaxy-Seed": str(seed),
-        },
-    )
+    headers = {
+        "Cache-Control": IMMUTABLE if eta == 0.0 else "no-store",
+        "ETag": f'"{SAMPLER}-{steps}-{eta}-{seed}-{class_id}-{guidance}"',
+        "X-Galaxy-Seed": str(seed),
+    }
+    if class_id is not None:
+        headers["X-Galaxy-Class"] = str(class_id)
+        headers["X-Galaxy-Guidance"] = str(guidance)
+
+    return Response(content=png, media_type="image/png", headers=headers)
 
 
 @app.get("/galaxies")
@@ -170,21 +218,48 @@ def galaxies(
     n: int = Query(10, ge=1, le=API_MAX_BATCH),
     seed: int | None = Query(None, ge=0, lt=2**31),
     steps: int = Query(DDIM_STEPS),
+    class_id: int | None = Query(None, alias="class", ge=0, lt=NUM_CLASSES),
+    guidance: float = Query(GUIDANCE_SCALE, ge=0.0, le=MAX_GUIDANCE),
 ) -> dict:
-    """Seeds for a gallery. The client fetches each image from /galaxy."""
+    """Seeds for a gallery. The client fetches each image from /galaxy.
+
+    Every returned URL names a concrete class, so an omitted `class` gives a
+    mixed batch while each individual image stays cacheable.
+    """
     validate_steps(steps)
-    get_generator()
+    generator = get_generator()
     seed = random_seed() if seed is None else seed
 
     rng = np.random.default_rng(seed)
     seeds = [int(s) for s in rng.integers(0, 2**31, size=n)]
 
-    logger.info(f"gallery  n={n} base_seed={seed} steps={steps}")
+    if not generator.conditional:
+        resolve_class(generator, class_id, seed)
+        classes: list[int | None] = [None] * n
+    elif class_id is None:
+        classes = [int(c) for c in rng.integers(NUM_CLASSES, size=n)]
+    else:
+        classes = [class_id] * n
 
-    return {
-        "seed": seed,
-        "count": n,
-        "galaxies": [
-            {"seed": s, "url": f"/galaxy?seed={s}&steps={steps}"} for s in seeds
-        ],
-    }
+    if not generator.conditional:
+        described = "none"
+    else:
+        described = "mixed" if class_id is None else str(class_id)
+
+    logger.info(
+        f"gallery  n={n} base_seed={seed} steps={steps} "
+        f"class={described} guidance={guidance}"
+    )
+
+    entries = []
+    for image_seed, image_class in zip(seeds, classes):
+        url = f"/galaxy?seed={image_seed}&steps={steps}"
+        entry = {"seed": image_seed, "url": url}
+        if image_class is not None:
+            entry["class_id"] = image_class
+            entry["class_name"] = CLASS_NAMES[image_class]
+            entry["guidance"] = guidance
+            entry["url"] = f"{url}&class={image_class}&guidance={guidance}"
+        entries.append(entry)
+
+    return {"seed": seed, "count": n, "galaxies": entries}
