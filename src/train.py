@@ -23,6 +23,7 @@ class TrainState(NamedTuple):
     model_state: ModelState
     opt_state: optax.OptState
     step: jnp.ndarray
+    ema_params: hk.Params
 
 
 @jax.jit
@@ -95,13 +96,30 @@ def make_train_fns(
     schedule: DiffusionSchedule,
     num_classes: int | None = None,
     p_uncond: float = 0.1,
+    ema_decay: float = 0.9999,
 ):
+    """Build the training step.
+
+    `ema_decay` maintains a second copy of the weights, an exponential moving
+    average of the trained ones. Sampling from the average rather than the last
+    iterate is standard for diffusion models and usually helps more than any
+    learning-rate change. The average is never optimised, only tracked.
+    """
+
+    def ema_update(ema, params, step):
+        warmup = (1.0 + step) / (10.0 + step)
+        decay = jnp.minimum(ema_decay, warmup)
+        return jax.tree_util.tree_map(
+            lambda e, p: decay * e + (1.0 - decay) * p, ema, params
+        )
+
     def init_train_state(model_state: ModelState) -> TrainState:
         opt_state = optimizer.init(model_state.params)
         return TrainState(
             model_state=model_state,
             opt_state=opt_state,
             step=jnp.array(0, dtype=jnp.int32),
+            ema_params=jax.tree_util.tree_map(jnp.copy, model_state.params),
         )
 
     @jax.jit
@@ -153,6 +171,7 @@ def make_train_fns(
             model_state=state.model_state._replace(params=new_params),
             opt_state=new_opt_state,
             step=state.step + 1,
+            ema_params=ema_update(state.ema_params, new_params, state.step),
         ), metrics
 
     return init_train_state, train_step
@@ -251,7 +270,7 @@ def fit_model(
         os.makedirs(figures_dir, exist_ok=True)
         gen_fn(
             key=key,
-            model_state=train_state.model_state,
+            model_state=train_state.model_state._replace(params=train_state.ema_params),
             filepath=f"{figures_dir}/epoch_{epoch}.png",
         )
 

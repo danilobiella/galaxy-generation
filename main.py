@@ -10,7 +10,7 @@ from src.config import (BATCH_SIZE, DATA_PATH, DDIM_STEPS, FIGURES_DIR,
                         GUIDANCE_SCALE, HISTORY_PATH, IMAGE_SIZE,
                         LEARNING_RATE, LOSS_PLOT_PATH, N_EPOCHS, NUM_CLASSES,
                         ON_KAGGLE, OUTPUT_DIR, P_UNCOND, SEED, STATE_PATH,
-                        TIMESTEPS, WARMUP_STEPS, WEIGHTS_PATH)
+                        EMA_DECAY, TIMESTEPS, WARMUP_STEPS, WEIGHTS_PATH)
 from src.data_loader import make_data_loaders
 from src.models import build_network  # This now needs to return a U-Net
 from src.plot import plot_gradients, plot_loss
@@ -104,6 +104,7 @@ init_train_state, train_step_fn = make_train_fns(
     schedule=diffusion_schedule,
     num_classes=NUM_CLASSES,
     p_uncond=P_UNCOND,
+    ema_decay=EMA_DECAY,
 )
 
 model_state = init_model_state(rng=jax.random.PRNGKey(SEED))
@@ -136,6 +137,10 @@ with open(HISTORY_PATH, "wb") as f:
 
 save_params(state.model_state.params, WEIGHTS_PATH)
 print(f"Saved inference weights to: {WEIGHTS_PATH}")
+
+EMA_WEIGHTS_PATH = WEIGHTS_PATH.with_name(WEIGHTS_PATH.stem + "_ema" + WEIGHTS_PATH.suffix)
+save_params(state.ema_params, EMA_WEIGHTS_PATH)
+print(f"Saved EMA weights to: {EMA_WEIGHTS_PATH}")
 
 # %% -- plots --------------------------------------------------------------
 
