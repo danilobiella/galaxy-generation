@@ -12,8 +12,10 @@ from pathlib import Path
 from PIL import Image
 
 from config import (
+    CLASS_NAMES,
     DDIM_ETA,
     DDIM_STEPS,
+    GUIDANCE_SCALE,
     IMAGE_SIZE,
     OUTPUT_DIR,
     SAMPLER,
@@ -35,6 +37,8 @@ def main() -> None:
     parser.add_argument("--steps", type=int, default=DDIM_STEPS)
     parser.add_argument("--eta", type=float, default=DDIM_ETA)
     parser.add_argument("--no-clip", dest="clip", action="store_false")
+    parser.add_argument("-c", "--class-id", type=int, default=None)
+    parser.add_argument("-g", "--guidance", type=float, default=GUIDANCE_SCALE)
     parser.add_argument("--weights", type=Path, default=WEIGHTS_PATH)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT_DIR)
     args = parser.parse_args()
@@ -46,6 +50,15 @@ def main() -> None:
     generator = Generator.from_weights(
         args.weights, image_size=IMAGE_SIZE, timesteps=TIMESTEPS
     )
+
+    if generator.conditional:
+        label = "cycling classes" if args.class_id is None else (
+            f"class {args.class_id} ({CLASS_NAMES[args.class_id]})"
+        )
+        print(f"Conditional checkpoint: {label}, guidance {args.guidance}")
+    elif args.class_id is not None:
+        parser_error = "Checkpoint is unconditional; --class-id not supported."
+        raise SystemExit(parser_error)
 
     print(
         f"Sampling {args.n_samples} image(s) with {args.sampler} "
@@ -59,6 +72,8 @@ def main() -> None:
         steps=args.steps,
         eta=args.eta,
         clip=args.clip,
+        labels=args.class_id,
+        guidance=args.guidance,
     )
     print(f"Done in {time.time() - start:.1f}s")
 

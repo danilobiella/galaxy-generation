@@ -49,14 +49,39 @@ def ddim_timesteps(total: int, n_steps: int) -> np.ndarray:
     return np.linspace(total - 1, 0, n_steps).round().astype(np.int32)
 
 
-def make_samplers(unet, schedule: DiffusionSchedule, image_shape) -> Samplers:
-    def predict_noise(params, x, t):
+def make_samplers(
+    unet, schedule: DiffusionSchedule, image_shape, num_classes: int | None = None
+) -> Samplers:
+    """Compiled reverse processes for `unet`.
+
+    When `num_classes` is set the samplers expect a `labels` array and a
+    `guidance` scale, and every step evaluates the network once on a batch
+    holding both the conditional and the unconditional (null-token) inputs.
+    `guidance` stays a traced argument, so sweeping it costs no recompilation.
+    """
+
+    def predict_noise(params, x, t, labels, guidance):
         t_batch = jnp.full((x.shape[0],), t, dtype=jnp.int32)
-        return unet.apply(params, None, (x, t_batch))
+
+        if num_classes is None:
+            return unet.apply(params, None, (x, t_batch, None))
+
+        null = jnp.full_like(labels, num_classes)
+        both = unet.apply(
+            params,
+            None,
+            (
+                jnp.concatenate([x, x]),
+                jnp.concatenate([t_batch, t_batch]),
+                jnp.concatenate([labels, null]),
+            ),
+        )
+        eps_cond, eps_uncond = jnp.split(both, 2)
+        return eps_uncond + guidance * (eps_cond - eps_uncond)
 
     @jax.jit
-    def ddpm_step(params, x, t, key):
-        eps_hat = predict_noise(params, x, t)
+    def ddpm_step(params, x, t, key, labels=None, guidance=1.0):
+        eps_hat = predict_noise(params, x, t, labels, guidance)
 
         a_t = schedule.alpha[t]
         a_hat_t = schedule.alpha_hat[t]
@@ -70,8 +95,8 @@ def make_samplers(unet, schedule: DiffusionSchedule, image_shape) -> Samplers:
         return mu + jnp.sqrt(b_t) * z
 
     @partial(jax.jit, static_argnums=(5,))
-    def ddim_step(params, x, t, t_prev, key, clip, eta):
-        eps_hat = predict_noise(params, x, t)
+    def ddim_step(params, x, t, t_prev, key, clip, eta, labels=None, guidance=1.0):
+        eps_hat = predict_noise(params, x, t, labels, guidance)
 
         a_hat_t = schedule.alpha_hat[t]
         a_hat_prev = jnp.where(
@@ -94,20 +119,23 @@ def make_samplers(unet, schedule: DiffusionSchedule, image_shape) -> Samplers:
         return jnp.sqrt(a_hat_prev) * x_0 + direction + sigma * z
 
     @partial(jax.jit, static_argnums=(0,))
-    def run_ddpm(n_samples, params, key):
+    def run_ddpm(n_samples, params, key, labels=None, guidance=1.0):
         init_key, loop_key = jax.random.split(key)
         x_T = jax.random.normal(init_key, (n_samples, *image_shape))
 
         def body(i, carry):
             x, carry_key = carry
             carry_key, step_key = jax.random.split(carry_key)
-            return ddpm_step(params, x, schedule.T - 1 - i, step_key), carry_key
+            x = ddpm_step(
+                params, x, schedule.T - 1 - i, step_key, labels, guidance
+            )
+            return x, carry_key
 
         x_0, _ = jax.lax.fori_loop(0, schedule.T, body, (x_T, loop_key))
         return x_0
 
     @partial(jax.jit, static_argnums=(0, 1, 2))
-    def run_ddim(n_samples, n_steps, clip, params, key, eta):
+    def run_ddim(n_samples, n_steps, clip, params, key, eta, labels=None, guidance=1.0):
         ts = jnp.asarray(ddim_timesteps(schedule.T, n_steps))
         ts_prev = jnp.concatenate([ts[1:], jnp.array([-1], dtype=jnp.int32)])
 
@@ -117,7 +145,9 @@ def make_samplers(unet, schedule: DiffusionSchedule, image_shape) -> Samplers:
         def body(i, carry):
             x, carry_key = carry
             carry_key, step_key = jax.random.split(carry_key)
-            x = ddim_step(params, x, ts[i], ts_prev[i], step_key, clip, eta)
+            x = ddim_step(
+                params, x, ts[i], ts_prev[i], step_key, clip, eta, labels, guidance
+            )
             return x, carry_key
 
         x_0, _ = jax.lax.fori_loop(0, n_steps, body, (x_T, loop_key))

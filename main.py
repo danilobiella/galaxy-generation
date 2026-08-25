@@ -6,9 +6,11 @@ import jax.numpy as jnp
 import optax  # type: ignore
 
 from src.config import (BATCH_SIZE, DATA_PATH, DDIM_STEPS, FIGURES_DIR,
-                        GRADIENT_PLOT_PATH, HISTORY_PATH, IMAGE_SIZE,
-                        LEARNING_RATE, LOSS_PLOT_PATH, N_EPOCHS, ON_KAGGLE,
-                        OUTPUT_DIR, SEED, STATE_PATH, TIMESTEPS, WEIGHTS_PATH)
+                        FINAL_LEARNING_RATE, GRADIENT_PLOT_PATH,
+                        GUIDANCE_SCALE, HISTORY_PATH, IMAGE_SIZE,
+                        LEARNING_RATE, LOSS_PLOT_PATH, N_EPOCHS, NUM_CLASSES,
+                        ON_KAGGLE, OUTPUT_DIR, P_UNCOND, SEED, STATE_PATH,
+                        TIMESTEPS, WARMUP_STEPS, WEIGHTS_PATH)
 from src.data_loader import make_data_loaders
 from src.models import build_network  # This now needs to return a U-Net
 from src.plot import plot_gradients, plot_loss
@@ -39,13 +41,16 @@ print(f"Number of training samples: {len(train_data_loader) * BATCH_SIZE}")
 
 # %% -- model and optimizer setup -------------------------------------------
 
-unet = build_network()
-print("Built U-Net network")
+unet = build_network(num_classes=NUM_CLASSES)
+print(f"Built U-Net network (num_classes={NUM_CLASSES})")
 
 # The U-Net takes (images, timesteps)
 dummy_images = jnp.zeros((BATCH_SIZE, *IMAGE_SIZE, 3))
 dummy_timesteps = jnp.zeros((BATCH_SIZE,), dtype=jnp.int32)
-unet_input = (dummy_images, dummy_timesteps)
+dummy_labels = None if NUM_CLASSES is None else jnp.zeros(
+    (BATCH_SIZE,), dtype=jnp.int32
+)
+unet_input = (dummy_images, dummy_timesteps, dummy_labels)
 
 print("\nU-Net architecture:")
 print(
@@ -55,30 +60,50 @@ print(
 )
 
 
-def lr_schedule(step):
-    # You can swap this for optax.warmup_cosine_decay_schedule if needed
-    return LEARNING_RATE
+lr_schedule = optax.warmup_cosine_decay_schedule(
+    init_value=0.0,
+    peak_value=LEARNING_RATE,
+    warmup_steps=WARMUP_STEPS,
+    decay_steps=n_steps,
+    end_value=FINAL_LEARNING_RATE,
+)
 
 
-optimizer = optax.adam(learning_rate=LEARNING_RATE, b1=0.9, b2=0.999)
-print("Built optimizer and schedule")
+def log_lr(step: int) -> float:
+    """The schedule as a plain float, for the training log."""
+    return float(lr_schedule(step))
+
+
+optimizer = optax.adam(learning_rate=lr_schedule, b1=0.9, b2=0.999)
+print(
+    f"Built optimizer | LR 0 -> {LEARNING_RATE:.1e} over {WARMUP_STEPS} warmup "
+    f"steps, cosine decay to {FINAL_LEARNING_RATE:.1e} by step {n_steps}"
+)
 
 # %% -- initialize state ---------------------------------------------------
 
 # Initialize the diffusion noise schedule
 diffusion_schedule = DiffusionSchedule.create(T=TIMESTEPS)
 
-samplers = make_samplers(unet, diffusion_schedule, (*IMAGE_SIZE, 3))
+samplers = make_samplers(
+    unet, diffusion_schedule, (*IMAGE_SIZE, 3), num_classes=NUM_CLASSES
+)
 
 init_model_state, generate_fn = make_model_fns(
     unet=unet,
     samplers=samplers,
     image_shape=(*IMAGE_SIZE, 3),
     sample_steps=DDIM_STEPS,
+    num_classes=NUM_CLASSES,
+    guidance=GUIDANCE_SCALE,
 )
 
 init_train_state, train_step_fn = make_train_fns(
-    unet=unet, optimizer=optimizer, schedule=diffusion_schedule
+    unet=unet,
+    optimizer=optimizer,
+    schedule=diffusion_schedule,
+    num_classes=NUM_CLASSES,
+    p_uncond=P_UNCOND,
 )
 
 model_state = init_model_state(rng=jax.random.PRNGKey(SEED))
@@ -93,7 +118,7 @@ state, history = fit_model(
     train_state=train_state,
     train_step_fn=train_step_fn,
     gen_fn=generate_fn,
-    lr_schedule=lr_schedule,
+    lr_schedule=log_lr,
     train_ds=train_data_loader,
     n_epochs=N_EPOCHS,
     figures_dir=str(FIGURES_DIR),

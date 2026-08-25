@@ -25,6 +25,23 @@ SAMPLER = "ddim"
 DDIM_STEPS = 50
 DDIM_ETA = 0.0
 
+NUM_CLASSES = 10
+P_UNCOND = 0.1
+GUIDANCE_SCALE = 3.0
+
+CLASS_NAMES = (
+    "Disturbed",
+    "Merging",
+    "Round Smooth",
+    "In-between Round Smooth",
+    "Cigar Shaped Smooth",
+    "Barred Spiral",
+    "Unbarred Tight Spiral",
+    "Unbarred Loose Spiral",
+    "Edge-on without Bulge",
+    "Edge-on with Bulge",
+)
+
 API_STEPS = (20, 50)
 API_MAX_BATCH = 10
 
@@ -32,3 +49,5 @@ BATCH_SIZE = 16
 N_EPOCHS = 50
 SEED = 42
 LEARNING_RATE = 1e-4
+WARMUP_STEPS = 500
+FINAL_LEARNING_RATE = 1e-6

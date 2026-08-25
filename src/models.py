@@ -106,14 +106,16 @@ class UNet(hk.Module):
         dim: int = 64,
         dim_mults: tuple[int, ...] = (1, 2, 4, 8),
         out_channels: int = 3,
+        num_classes: int | None = None,
     ):
         super().__init__()
         self.dim = dim
         self.dim_mults = dim_mults
         self.out_channels = out_channels
+        self.num_classes = num_classes
 
     def __call__(self, input):
-        x, time = input  # <-- Using your preferred signature
+        x, time, labels = input
 
         # 1. Timestep Embedding setup
         time_dim = self.dim * 4
@@ -121,6 +123,17 @@ class UNet(hk.Module):
         t_emb = hk.Linear(time_dim)(t_emb)
         t_emb = jax.nn.swish(t_emb)
         t_emb = hk.Linear(time_dim)(t_emb)
+
+        # 1b. Class conditioning, sharing the timestep embedding pathway.
+        # Row `num_classes` is the null token used by the unconditional branch.
+        if self.num_classes is not None:
+            if labels is None:
+                raise ValueError("Conditional UNet called without labels.")
+            t_emb = t_emb + hk.Embed(
+                vocab_size=self.num_classes + 1,
+                embed_dim=time_dim,
+                name="class_embed",
+            )(labels)
 
         # 2. Initial Convolution
         x = hk.Conv2D(self.dim, kernel_shape=3, padding="SAME")(x)
@@ -169,15 +182,27 @@ class UNet(hk.Module):
         return x
 
 
-def build_network():
-    """
-    Returns a Haiku transformed function representing the U-Net.
-    This replaces the previous GAN generator/discriminator return.
+def build_network(num_classes: int | None = None):
+    """Haiku-transformed U-Net taking `(images, timesteps, labels)`.
+
+    `num_classes=None` builds the unconditional model, with exactly the same
+    parameter names as before class conditioning existed, so old checkpoints
+    still load. Pass `labels=None` when calling it.
     """
 
     @hk.transform
     def unet(input):
-        model = UNet(dim=64, dim_mults=(1, 2, 4, 8), out_channels=3)
+        model = UNet(
+            dim=64,
+            dim_mults=(1, 2, 4, 8),
+            out_channels=3,
+            num_classes=num_classes,
+        )
         return model(input)
 
     return unet
+
+
+def is_conditional(params) -> bool:
+    """Whether a parameter tree came from a class-conditional network."""
+    return any("class_embed" in key for key in params)

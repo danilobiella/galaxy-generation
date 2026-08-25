@@ -36,12 +36,15 @@ def make_model_fns(
     samplers: Samplers,
     image_shape: tuple[int, int, int] = (256, 256, 3),
     sample_steps: int = 20,
+    num_classes: int | None = None,
+    guidance: float = 1.0,
 ):
     def init_model_state(rng: jax.Array) -> ModelState:
         dummy_image = jnp.zeros((1, *image_shape))
         dummy_t = jnp.zeros((1,), dtype=jnp.int32)
+        dummy_y = None if num_classes is None else jnp.zeros((1,), dtype=jnp.int32)
 
-        dummy_input = (dummy_image, dummy_t)
+        dummy_input = (dummy_image, dummy_t, dummy_y)
         params = unet.init(rng, dummy_input)
         return ModelState(params=params)
 
@@ -53,8 +56,20 @@ def make_model_fns(
         n_rows, n_cols = 4, 4
         n_samples = n_rows * n_cols
 
+        # One class per row, so the epoch figure shows conditioning working
+        labels = None
+        if num_classes is not None:
+            labels = jnp.repeat(jnp.arange(n_rows) % num_classes, n_cols)
+
         latents = samplers.run_ddim(
-            n_samples, sample_steps, True, model_state.params, key, 0.0
+            n_samples,
+            sample_steps,
+            True,
+            model_state.params,
+            key,
+            0.0,
+            labels,
+            guidance,
         )
 
         images_np = jax.device_get(jnp.clip((latents + 1.0) / 2.0, 0.0, 1.0))
@@ -78,6 +93,8 @@ def make_train_fns(
     unet: hk.Transformed,
     optimizer: optax.GradientTransformation,
     schedule: DiffusionSchedule,
+    num_classes: int | None = None,
+    p_uncond: float = 0.1,
 ):
     def init_train_state(model_state: ModelState) -> TrainState:
         opt_state = optimizer.init(model_state.params)
@@ -88,9 +105,9 @@ def make_train_fns(
         )
 
     @jax.jit
-    def train_step(key, state, real_imgs):
+    def train_step(key, state, real_imgs, labels=None):
         def loss_fn(params, key):
-            t_key, noise_key = jax.random.split(key)
+            t_key, noise_key, drop_key = jax.random.split(key, 3)
             batch_size = real_imgs.shape[0]
 
             # 1. Sample random timesteps
@@ -105,11 +122,19 @@ def make_train_fns(
             # 4. Forward process: Corrupt images to timestep t (Reparameterization Trick)
             x_t = jnp.sqrt(a_hat_t) * real_imgs + jnp.sqrt(1.0 - a_hat_t) * epsilon
 
-            # 5. Predict the added noise using the U-Net
-            input = (x_t, t)
+            # 5. Drop the label on a fraction of the batch so the same network
+            # also learns the unconditional score needed by guided sampling
+            if num_classes is None:
+                y = None
+            else:
+                dropped = jax.random.uniform(drop_key, (batch_size,)) < p_uncond
+                y = jnp.where(dropped, num_classes, labels.astype(jnp.int32))
+
+            # 6. Predict the added noise using the U-Net
+            input = (x_t, t, y)
             eps_hat = unet.apply(params, None, input)
 
-            # 6. Simple MSE Loss
+            # 7. Simple MSE Loss
             return jnp.mean(jnp.square(epsilon - eps_hat))
 
         loss, grads = jax.value_and_grad(loss_fn)(state.model_state.params, key)
@@ -156,10 +181,13 @@ def train_epoch(
     for i in range(n_batches):
         batch = next(ds_iter)
         # Extract images from tuple if your dataloader returns (images, labels)
-        real_imgs = batch[0] if isinstance(batch, tuple) else batch
+        if isinstance(batch, tuple):
+            real_imgs, labels = batch[0], batch[1]
+        else:
+            real_imgs, labels = batch, None
 
         key, step_key = jax.random.split(key)
-        train_state, metrics = train_step_fn(step_key, train_state, real_imgs)
+        train_state, metrics = train_step_fn(step_key, train_state, real_imgs, labels)
 
         for k, v in metrics.items():
             epoch_metrics[k].append(float(v))
