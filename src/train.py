@@ -236,7 +236,7 @@ def fit_model(
     train_ds,
     n_epochs: int = 50,
     print_every: int = 100,
-    figures_dir: str = "output/figures",
+    figures_dir: str = "runs/figures",
 ):
     history: dict[str, list[float]] = {
         "loss": [],

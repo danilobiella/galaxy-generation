@@ -10,7 +10,7 @@ LOCAL_DATA_PATH = "data/galaxy10_decals_lmdb"
 DATA_PATH = KAGGLE_DATA_PATH if ON_KAGGLE else LOCAL_DATA_PATH
 
 RUNS_DIR = Path(".") if ON_KAGGLE else Path("runs")
-CHECKPOINTS_DIR = Path("checkpoints")
+CHECKPOINTS_DIR = Path("model_checkpoints")
 STUDY_DIR = Path("study")
 
 FIGURES_DIR = RUNS_DIR / "figures"

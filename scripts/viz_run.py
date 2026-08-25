@@ -4,7 +4,7 @@ Reads history.pkl and figures/ from a run directory and writes the plots back
 into it.
 
 Usage:
-    python viz_run.py                # visualize output/
+    python viz_run.py                # visualize runs/
     python viz_run.py path/to/run    # visualize an archived run
 """
 

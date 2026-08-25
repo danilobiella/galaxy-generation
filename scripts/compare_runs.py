@@ -7,7 +7,7 @@ between runs becomes visible.
 
 Usage:
     python -m scripts.compare_runs
-    python -m scripts.compare_runs --runs output/old output/new --labels baseline cosine
+    python -m scripts.compare_runs --runs runs/old runs/new --labels baseline cosine
 """
 
 import argparse
@@ -18,9 +18,9 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from config import N_EPOCHS, OUTPUT_DIR
+from config import N_EPOCHS, RUNS_DIR
 
-DEFAULT_RUNS = (OUTPUT_DIR / "old", OUTPUT_DIR / "new")
+DEFAULT_RUNS = (RUNS_DIR / "old", RUNS_DIR / "new")
 METRICS = ("loss", "grad_norm", "param_norm")
 
 
@@ -69,7 +69,7 @@ def main() -> None:
     parser.add_argument("--labels", nargs="+", default=None)
     parser.add_argument("--epochs", type=int, default=N_EPOCHS)
     parser.add_argument("--tail", type=int, default=10, help="epochs in the zoom panel")
-    parser.add_argument("--out", type=Path, default=OUTPUT_DIR / "figures" / "run_comparison.png")
+    parser.add_argument("--out", type=Path, default=RUNS_DIR / "figures" / "run_comparison.png")
     args = parser.parse_args()
 
     labels = args.labels or [run.name for run in args.runs]
