@@ -15,7 +15,7 @@ import json
 import math
 from pathlib import Path
 
-from config import CLASS_NAMES, OUTPUT_DIR
+from config import CLASS_NAMES, STUDY_DIR
 
 COMPARISONS = {
     "ab": ("A", "B", "A vs B"),
@@ -53,7 +53,7 @@ def detectable(n: int) -> float:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--study", type=Path, default=OUTPUT_DIR / "study")
+    parser.add_argument("--study", type=Path, default=STUDY_DIR)
     parser.add_argument("--results", type=Path, default=None)
     parser.add_argument("--by-class", action="store_true")
     args = parser.parse_args()

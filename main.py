@@ -9,8 +9,9 @@ from src.config import (BATCH_SIZE, DATA_PATH, DDIM_STEPS, FIGURES_DIR,
                         FINAL_LEARNING_RATE, GRADIENT_PLOT_PATH,
                         GUIDANCE_SCALE, HISTORY_PATH, IMAGE_SIZE,
                         LEARNING_RATE, LOSS_PLOT_PATH, N_EPOCHS, NUM_CLASSES,
-                        ON_KAGGLE, OUTPUT_DIR, P_UNCOND, SEED, STATE_PATH,
-                        EMA_DECAY, TIMESTEPS, WARMUP_STEPS, WEIGHTS_PATH)
+                        ON_KAGGLE, P_UNCOND, RUNS_DIR, SEED, STATE_PATH,
+                        EMA_DECAY, TIMESTEPS, TRAIN_WEIGHTS_PATH,
+                        WARMUP_STEPS)
 from src.data_loader import make_data_loaders
 from src.models import build_network  # This now needs to return a U-Net
 from src.plot import plot_gradients, plot_loss
@@ -127,7 +128,7 @@ state, history = fit_model(
 
 # %% save network state and history ----------------------------------------
 
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+RUNS_DIR.mkdir(parents=True, exist_ok=True)
 
 with open(STATE_PATH, "wb") as f:
     pickle.dump(state, f)
@@ -135,10 +136,12 @@ with open(STATE_PATH, "wb") as f:
 with open(HISTORY_PATH, "wb") as f:
     pickle.dump(history, f)
 
-save_params(state.model_state.params, WEIGHTS_PATH)
-print(f"Saved inference weights to: {WEIGHTS_PATH}")
+save_params(state.model_state.params, TRAIN_WEIGHTS_PATH)
+print(f"Saved inference weights to: {TRAIN_WEIGHTS_PATH}")
 
-EMA_WEIGHTS_PATH = WEIGHTS_PATH.with_name(WEIGHTS_PATH.stem + "_ema" + WEIGHTS_PATH.suffix)
+EMA_WEIGHTS_PATH = TRAIN_WEIGHTS_PATH.with_name(
+    TRAIN_WEIGHTS_PATH.stem + "_ema" + TRAIN_WEIGHTS_PATH.suffix
+)
 save_params(state.ema_params, EMA_WEIGHTS_PATH)
 print(f"Saved EMA weights to: {EMA_WEIGHTS_PATH}")
 

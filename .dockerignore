@@ -15,8 +15,10 @@ __pycache__
 .ruff_cache
 .mypy_cache
 
-output/*
-!output/galaxy_unet.safetensors
+runs/*
+study/*
+checkpoints/*
+!checkpoints/galaxy_unet.safetensors
 
 src/train.py
 src/plot.py

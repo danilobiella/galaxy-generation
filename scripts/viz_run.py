@@ -22,10 +22,10 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 from PIL import Image  # noqa: E402
 
-from config import OUTPUT_DIR  # noqa: E402
+from config import RUNS_DIR  # noqa: E402
 from plot import WINDOW, plot_gradients, plot_loss  # noqa: E402
 
-DEFAULT_RUN_DIR = OUTPUT_DIR
+DEFAULT_RUN_DIR = RUNS_DIR
 DIFFUSION_KEYS = {"loss", "grad_norm", "param_norm"}
 EPOCH_LINE = re.compile(
     r"\[EPOCH (\d+)\] COMPLETED \| Time: ([\d.]+)s \| AVG Loss: ([\d.]+)"

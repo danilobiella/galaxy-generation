@@ -9,14 +9,18 @@ LOCAL_DATA_PATH = "data/galaxy10_decals_lmdb"
 
 DATA_PATH = KAGGLE_DATA_PATH if ON_KAGGLE else LOCAL_DATA_PATH
 
-OUTPUT_DIR = Path(".") if ON_KAGGLE else Path("output")
+RUNS_DIR = Path(".") if ON_KAGGLE else Path("runs")
+CHECKPOINTS_DIR = Path("checkpoints")
+STUDY_DIR = Path("study")
 
-FIGURES_DIR = OUTPUT_DIR / "figures"
-STATE_PATH = OUTPUT_DIR / "state.pkl"
-HISTORY_PATH = OUTPUT_DIR / "history.pkl"
-WEIGHTS_PATH = OUTPUT_DIR / "galaxy_unet.safetensors"
-LOSS_PLOT_PATH = OUTPUT_DIR / "loss_plot.png"
-GRADIENT_PLOT_PATH = OUTPUT_DIR / "gradient_plot.png"
+FIGURES_DIR = RUNS_DIR / "figures"
+STATE_PATH = RUNS_DIR / "state.pkl"
+HISTORY_PATH = RUNS_DIR / "history.pkl"
+LOSS_PLOT_PATH = RUNS_DIR / "loss_plot.png"
+GRADIENT_PLOT_PATH = RUNS_DIR / "gradient_plot.png"
+TRAIN_WEIGHTS_PATH = RUNS_DIR / "galaxy_unet.safetensors"
+
+WEIGHTS_PATH = CHECKPOINTS_DIR / "galaxy_unet.safetensors"
 
 IMAGE_SIZE = (64, 64)
 TIMESTEPS = 1000

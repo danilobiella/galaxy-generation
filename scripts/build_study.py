@@ -27,7 +27,8 @@ from config import (
     GUIDANCE_SCALE,
     IMAGE_SIZE,
     NUM_CLASSES,
-    OUTPUT_DIR,
+    RUNS_DIR,
+    STUDY_DIR,
     TIMESTEPS,
 )
 from generate import Generator
@@ -75,8 +76,8 @@ def sample_for(path, labels, seed, batch, steps, guidance, name):
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--a", type=Path, default=OUTPUT_DIR / "old" / "galaxy_unet.safetensors")
-    parser.add_argument("--b", type=Path, default=OUTPUT_DIR / "new" / "galaxy_unet.safetensors")
+    parser.add_argument("--a", type=Path, default=RUNS_DIR / "old" / "galaxy_unet.safetensors")
+    parser.add_argument("--b", type=Path, default=RUNS_DIR / "new" / "galaxy_unet.safetensors")
     parser.add_argument("--pairs", type=int, default=6, help="A-vs-B trials per class")
     parser.add_argument("--catch", type=int, default=2, help="real-vs-model trials per class per model")
     parser.add_argument("-g", "--guidance", type=float, default=GUIDANCE_SCALE)
@@ -84,7 +85,7 @@ def main() -> None:
     parser.add_argument("--batch", type=int, default=8)
     parser.add_argument("--seed", type=int, default=1234)
     parser.add_argument("--data", type=Path, default=Path(DATA_PATH))
-    parser.add_argument("--out", type=Path, default=OUTPUT_DIR / "study")
+    parser.add_argument("--out", type=Path, default=STUDY_DIR)
     args = parser.parse_args()
 
     rng = np.random.default_rng(args.seed)
@@ -106,7 +107,7 @@ def main() -> None:
     b_catch = sample_for(args.b, catch_labels, args.seed + 10**6, args.batch, args.steps, args.guidance, "B (catch)")
 
     print("\n  loading real images ...")
-    cache = OUTPUT_DIR / "memorization" / f"refs_{IMAGE_SIZE[0]}x{IMAGE_SIZE[1]}_all.npy"
+    cache = RUNS_DIR / "memorization" / f"refs_{IMAGE_SIZE[0]}x{IMAGE_SIZE[1]}_all.npy"
     dataset = load_dataset(args.data, IMAGE_SIZE, cache_path=cache)
     dataset_labels = load_labels(args.data)
 

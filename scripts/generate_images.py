@@ -17,14 +17,14 @@ from config import (
     DDIM_STEPS,
     GUIDANCE_SCALE,
     IMAGE_SIZE,
-    OUTPUT_DIR,
+    RUNS_DIR,
     SAMPLER,
     TIMESTEPS,
     WEIGHTS_PATH,
 )
 from generate import SAMPLERS, Generator, random_seed
 
-DEFAULT_OUT_DIR = OUTPUT_DIR / "generated"
+DEFAULT_OUT_DIR = RUNS_DIR / "generated"
 
 
 def main() -> None:
