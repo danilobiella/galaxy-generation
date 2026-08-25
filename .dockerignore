@@ -23,3 +23,4 @@ checkpoints/*
 src/train.py
 src/plot.py
 src/data_loader.py
+src/memorization.py
