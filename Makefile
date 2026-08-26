@@ -14,7 +14,7 @@ DOCKER_IMAGE := galaxy-api
 HF_SPACE := galaxy-generation
 
 .PHONY: data kaggle-dataset-stage kaggle-dataset-push kaggle-dataset-clean \
-        kaggle-stage kaggle-push kaggle-clean api api-cpu \
+        kaggle-stage kaggle-push kaggle-clean test api api-cpu \
         docker-build docker-run hf-check hf-deploy
 
 data: $(BIN_DATA_FILES)
@@ -58,6 +58,11 @@ kaggle-push: kaggle-stage
 kaggle-clean:
 	@echo "$(GREEN)Cleaning staging directory...$(RESET)"
 	kaggle-bundler clean
+
+# Run the test suite (CPU only, no checkpoint required)
+test:
+	@echo "$(GREEN)Running tests...$(RESET)"
+	JAX_PLATFORMS=cpu pytest -q
 
 # Serve the model
 api:

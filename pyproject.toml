@@ -48,6 +48,7 @@ safetensors = ">=0.8.0,<0.9"
 fastapi = ">=0.141.1,<0.142"
 uvicorn = ">=0.52.1,<0.53"
 pillow = ">=12.3.0,<13"
+pytest = ">=9.1.1,<10"
 
 [tool.pixi.tasks]
 
@@ -59,3 +60,6 @@ entrypoint = "main.py"
 include = ["src"]
 pip_deps = ["dm-haiku", "lmdb", "safetensors"]
 output = ".kaggle_push/script.py"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
