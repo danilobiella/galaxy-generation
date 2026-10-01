@@ -1,3 +1,5 @@
+import itertools
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -273,9 +275,8 @@ class TestEmaUpdate:
 class TestTrainEpoch:
     def test_consumes_every_batch(self, net, sched, batch):
         state, step_fn = make_trainer(net, sched)
-        ds = [batch] * 4
         state, metrics, _ = train_epoch(
-            jax.random.key(0), state, step_fn, ds, 1, 1, lambda s: 1e-4
+            jax.random.key(0), state, step_fn, iter([batch] * 4), 4, 1, 1, lambda s: 1e-4
         )
         assert len(metrics["loss"]) == 4
         assert int(state.step) == 4
@@ -285,14 +286,23 @@ class TestTrainEpoch:
         state, step_fn = make_trainer(net, sched, num_classes=NUM_CLASSES, p_uncond=0.0)
         labels = jnp.array([0, 1, 1, 1], jnp.int32)
         after, _, _ = train_epoch(
-            jax.random.key(0), state, step_fn, [(batch, labels)], 1, 1, lambda s: 1e-4
+            jax.random.key(0),
+            state,
+            step_fn,
+            iter([(batch, labels)]),
+            1,
+            1,
+            1,
+            lambda s: 1e-4,
         )
         assert moved_rows(state.model_state.params, after.model_state.params) == {0, 1}
 
     def test_returns_a_fresh_key(self, net, sched, batch):
         state, step_fn = make_trainer(net, sched)
         key = jax.random.key(0)
-        _, _, out_key = train_epoch(key, state, step_fn, [batch], 1, 1, lambda s: 1e-4)
+        _, _, out_key = train_epoch(
+            key, state, step_fn, iter([batch]), 1, 1, 1, lambda s: 1e-4
+        )
         assert not np.array_equal(
             np.asarray(jax.random.key_data(key)), np.asarray(jax.random.key_data(out_key))
         )
@@ -300,10 +310,58 @@ class TestTrainEpoch:
     def test_collects_all_three_metrics(self, net, sched, batch):
         state, step_fn = make_trainer(net, sched)
         _, metrics, _ = train_epoch(
-            jax.random.key(0), state, step_fn, [batch] * 2, 1, 1, lambda s: 1e-4
+            jax.random.key(0), state, step_fn, iter([batch] * 2), 2, 1, 1, lambda s: 1e-4
         )
         assert set(metrics) == {"loss", "grad_norm", "param_norm"}
         assert all(len(v) == 2 for v in metrics.values())
+
+
+class CountingStream:
+    """Records how the trainer drives it: one iter(), then next() per step."""
+
+    def __init__(self, batch):
+        self.batch = batch
+        self.iter_calls = 0
+        self.next_calls = 0
+
+    def __iter__(self):
+        self.iter_calls += 1
+        return self
+
+    def __next__(self):
+        self.next_calls += 1
+        return self.batch
+
+
+class TestStreamConsumption:
+    def test_the_stream_is_iterated_once_and_pulled_per_step(
+        self, net, sched, batch, tmp_path
+    ):
+        """Re-iterating per epoch would replay epoch 1 forever on a real loader."""
+        state, step_fn = make_trainer(net, sched)
+        stream = CountingStream(batch)
+        final, history = fit_model(
+            jax.random.key(0),
+            state,
+            step_fn,
+            gen_fn=lambda key, model_state, filepath: None,
+            lr_schedule=lambda s: 1e-4,
+            train_ds=stream,
+            steps_per_epoch=3,
+            n_epochs=2,
+            figures_dir=str(tmp_path / "figures"),
+        )
+        assert stream.iter_calls == 1
+        assert stream.next_calls == 6
+        assert int(final.step) == 6
+        assert len(history["loss"]) == 6
+
+    def test_a_stream_shorter_than_steps_raises_a_clear_error(self, net, sched, batch):
+        state, step_fn = make_trainer(net, sched)
+        with pytest.raises(RuntimeError, match="steps_per_epoch"):
+            train_epoch(
+                jax.random.key(0), state, step_fn, iter([batch]), 3, 1, 1, lambda s: 1e-4
+            )
 
 
 class TestFitModel:
@@ -318,7 +376,8 @@ class TestFitModel:
             step_fn,
             gen_fn=lambda key, model_state, filepath: calls.append(filepath),
             lr_schedule=lambda s: 1e-4,
-            train_ds=[batch],
+            train_ds=itertools.repeat(batch),
+            steps_per_epoch=1,
             n_epochs=history_len,
             figures_dir=str(tmp_path / "figures"),
         )
@@ -340,7 +399,8 @@ class TestFitModel:
                 float(model_state.params["w"])
             ),
             lr_schedule=lambda s: 1e-4,
-            train_ds=[batch],
+            train_ds=itertools.repeat(batch),
+            steps_per_epoch=1,
             n_epochs=1,
             figures_dir=str(tmp_path / "figures"),
         )

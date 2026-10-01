@@ -72,13 +72,18 @@ def marker_corner(image):
     return np.unravel_index(int(np.argmax(image[:, :, 0])), image.shape[:2])
 
 
-def run_epoch(dataset):
+def run_epoch(data, epoch=0):
+    """The batches making up one epoch; the stream is indexable, so epochs are too."""
     images, labels = [], []
-    for i in range(len(dataset)):
-        batch_x, batch_y = dataset[i]
+    for i in range(data.steps_per_epoch):
+        batch_x, batch_y = data.batches[epoch * data.steps_per_epoch + i]
         images.extend(np.asarray(batch_x))
         labels.extend(np.asarray(batch_y))
     return np.stack(images), np.asarray(labels)
+
+
+def first_batch(data):
+    return data.batches[0]
 
 
 class TestDihedralAugment:
@@ -158,7 +163,7 @@ class TestAugmentFeatures:
 class TestPipeline:
     def test_batch_shape_and_dtype(self, make_lmdb):
         ds = make_data_loaders(make_lmdb(24), batch_size=4, seed=0)
-        images, _ = ds[0]
+        images, _ = first_batch(ds)
         assert np.asarray(images).shape == (4, SIZE, SIZE, 3)
         assert np.asarray(images).dtype == np.float32
 
@@ -171,12 +176,12 @@ class TestPipeline:
         ds = make_data_loaders(
             make_lmdb(24), batch_size=4, seed=0, image_size=(4, 4)
         )
-        images, _ = ds[0]
+        images, _ = first_batch(ds)
         assert np.asarray(images).shape == (4, 4, 4, 3)
 
     def test_drop_remainder_discards_the_partial_batch(self, make_lmdb):
         ds = make_data_loaders(make_lmdb(25), batch_size=4, seed=0)
-        assert len(ds) == 6
+        assert ds.steps_per_epoch == 6
         images, _ = run_epoch(ds)
         assert len(images) == 24
 
@@ -220,33 +225,49 @@ class TestPipeline:
 
 
 class TestPerEpochRandomness:
-    """Targets for the reshuffle work; these fail against the current loader.
 
-    `strict=True` means the suite turns red once they start passing, which is the
-    signal to delete the markers.
-    """
-
-    @pytest.mark.xfail(
-        strict=True,
-        reason="no .repeat(): every epoch replays the same shuffle permutation",
-    )
     def test_consecutive_epochs_use_different_orders(self, make_lmdb):
         ds = make_data_loaders(make_lmdb(24), batch_size=4, seed=0)
-        first, _ = run_epoch(ds)
-        second, _ = run_epoch(ds)
+        first, _ = run_epoch(ds, 0)
+        second, _ = run_epoch(ds, 1)
         assert [sample_id(i) for i in first] != [sample_id(i) for i in second]
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="random_map seeds off the element index, so an image's "
-        "augmentation is fixed until .repeat() gives it new indices",
-    )
     def test_an_image_is_augmented_differently_across_epochs(self, make_lmdb):
         ds = make_data_loaders(make_lmdb(24), batch_size=4, seed=0, augment=True)
 
         def corner_by_id(images):
             return {sample_id(img): marker_corner(img) for img in images}
 
-        first, _ = run_epoch(ds)
-        second, _ = run_epoch(ds)
+        first, _ = run_epoch(ds, 0)
+        second, _ = run_epoch(ds, 1)
         assert corner_by_id(first) != corner_by_id(second)
+
+    def test_every_epoch_is_an_exact_pass(self, make_lmdb):
+        """Batching before repeating is what keeps this true."""
+        ds = make_data_loaders(make_lmdb(24), batch_size=4, seed=0)
+        for epoch in range(6):
+            images, _ = run_epoch(ds, epoch)
+            assert sorted(sample_id(i) for i in images) == list(range(24))
+
+    def test_every_epoch_is_an_exact_pass_with_a_remainder(self, make_lmdb):
+        """25 records into batches of 4 drops one per epoch, never the same one."""
+        ds = make_data_loaders(make_lmdb(25), batch_size=4, seed=0)
+        dropped = set()
+        for epoch in range(8):
+            images, _ = run_epoch(ds, epoch)
+            seen = [sample_id(i) for i in images]
+            assert len(seen) == len(set(seen)) == 24
+            dropped |= set(range(25)) - set(seen)
+        assert len(dropped) > 1
+
+    def test_every_epoch_is_ordered_differently(self, make_lmdb):
+        ds = make_data_loaders(make_lmdb(24), batch_size=4, seed=0)
+        orders = [tuple(sample_id(i) for i in run_epoch(ds, e)[0]) for e in range(5)]
+        assert len(set(orders)) == 5
+
+    def test_labels_track_their_images_every_epoch(self, make_lmdb):
+        ds = make_data_loaders(make_lmdb(24), batch_size=4, seed=0)
+        for epoch in range(3):
+            images, labels = run_epoch(ds, epoch)
+            for image, label in zip(images, labels):
+                assert label == sample_id(image) % NUM_CLASSES

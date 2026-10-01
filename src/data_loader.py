@@ -110,13 +110,30 @@ def augment_features(
     return (dihedral_augment(image, rng), label)
 
 
+@dataclass(frozen=True)
+class TrainingData:
+    """An endless stream of batches, plus how many of them make one epoch.
+
+    `repeat` reseeds the upstream `shuffle` and `random_map` per epoch, so each
+    pass is ordered and augmented differently. Batching before repeating keeps
+    an epoch an exact pass over the data: the same number of trailing samples is
+    dropped each epoch, but a different set of them, since the order changes.
+
+    Repeating makes the dataset infinite, so `len()` no longer gives the epoch
+    length and the count travels alongside the stream.
+    """
+
+    batches: grain.MapDataset
+    steps_per_epoch: int
+
+
 def make_data_loaders(
     db_path: str,
     batch_size: int,
     seed: int = 42,
     image_size: Optional[Tuple[int, int]] = None,
     augment: bool = True,
-) -> grain.MapDataset:
+) -> TrainingData:
     temp_env = lmdb.open(db_path, readonly=True, lock=False)
     with temp_env.begin() as txn:
         meta = pickle.loads(txn.get(b"__metadata__"))
@@ -128,12 +145,14 @@ def make_data_loaders(
 
     process_fn = partial(process_features, image_size=image_size)
 
-    dataset = grain.MapDataset.source(source).shuffle(seed=seed).map(process_fn)
+    dataset = grain.MapDataset.source(source).seed(seed).shuffle().map(process_fn)
 
     if augment:
-        dataset = dataset.random_map(augment_features, seed=seed + 1)
+        dataset = dataset.random_map(augment_features)
 
-    return dataset.batch(batch_size=batch_size, drop_remainder=True)
+    epoch = dataset.batch(batch_size=batch_size, drop_remainder=True)
+
+    return TrainingData(epoch.repeat(None), len(epoch))
 
 
 def make_overfit_loader(

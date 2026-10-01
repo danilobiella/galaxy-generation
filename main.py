@@ -9,7 +9,8 @@ from src.config import (BATCH_SIZE, DATA_PATH, DDIM_STEPS, FIGURES_DIR,
                         FINAL_LEARNING_RATE, GRADIENT_PLOT_PATH,
                         GUIDANCE_SCALE, HISTORY_PATH, IMAGE_SIZE,
                         LEARNING_RATE, LOSS_PLOT_PATH, N_EPOCHS, NUM_CLASSES,
-                        ON_KAGGLE, P_UNCOND, RUNS_DIR, SEED, STATE_PATH,
+                        DATA_SEED, ON_KAGGLE, P_UNCOND, RUNS_DIR, SEED,
+                        STATE_PATH,
                         EMA_DECAY, TIMESTEPS, TRAIN_WEIGHTS_PATH,
                         WARMUP_STEPS)
 from src.data_loader import make_data_loaders
@@ -23,22 +24,22 @@ print("Running on Kaggle" if ON_KAGGLE else "Running locally")
 
 # %% -- data ---------------------------------------------------------------
 
-train_data_loader = make_data_loaders(
+training_data = make_data_loaders(
     db_path=DATA_PATH,
     batch_size=BATCH_SIZE,
-    seed=SEED,
+    seed=DATA_SEED,
     image_size=(IMAGE_SIZE[0], IMAGE_SIZE[1]),
 )
 
-steps_per_epoch = len(train_data_loader)
+steps_per_epoch = training_data.steps_per_epoch
 n_steps = N_EPOCHS * steps_per_epoch
 
 print(f"Steps per epoch: {steps_per_epoch}")
 print(f"Total training steps: {n_steps}")
 
 print("Made data loader")
-print(f"Number of training batches: {len(train_data_loader)}")
-print(f"Number of training samples: {len(train_data_loader) * BATCH_SIZE}")
+print(f"Number of training batches: {steps_per_epoch}")
+print(f"Number of training samples: {steps_per_epoch * BATCH_SIZE}")
 
 # %% -- model and optimizer setup -------------------------------------------
 
@@ -121,7 +122,8 @@ state, history = fit_model(
     train_step_fn=train_step_fn,
     gen_fn=generate_fn,
     lr_schedule=log_lr,
-    train_ds=train_data_loader,
+    train_ds=training_data.batches,
+    steps_per_epoch=steps_per_epoch,
     n_epochs=N_EPOCHS,
     figures_dir=str(FIGURES_DIR),
 )

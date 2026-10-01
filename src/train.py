@@ -181,14 +181,13 @@ def train_epoch(
     key: jax.Array,
     train_state: TrainState,
     train_step_fn,
-    train_ds,
+    batches,
+    steps: int,
     epoch: int,
     n_epochs: int,
     lr_schedule,
     print_every: int = 100,
 ):
-    n_batches = len(train_ds)
-    ds_iter = iter(train_ds)
 
     epoch_metrics: dict[str, list[float]] = {
         "loss": [],
@@ -197,8 +196,14 @@ def train_epoch(
     }
 
     last_idx = 0
-    for i in range(n_batches):
-        batch = next(ds_iter)
+    for i in range(steps):
+        try:
+            batch = next(batches)
+        except StopIteration:
+            raise RuntimeError(
+                f"Batch stream ended after {i} of {steps} steps in epoch {epoch}. "
+                "steps_per_epoch does not match the data being passed in."
+            ) from None
         # Extract images from tuple if your dataloader returns (images, labels)
         if isinstance(batch, tuple):
             real_imgs, labels = batch[0], batch[1]
@@ -217,7 +222,7 @@ def train_epoch(
             win_grad = np.mean(epoch_metrics["grad_norm"][last_idx:])
 
             print(
-                f"[Ep {epoch}/{n_epochs}][B {i}/{n_batches}] "
+                f"[Ep {epoch}/{n_epochs}][B {i}/{steps}] "
                 f"Loss: {win_loss:.4f} | "
                 f"Grad Norm: {win_grad:.2e} | "
                 f"LR: {lr:.2e}"
@@ -234,6 +239,7 @@ def fit_model(
     gen_fn,
     lr_schedule,
     train_ds,
+    steps_per_epoch: int,
     n_epochs: int = 50,
     print_every: int = 100,
     figures_dir: str = "runs/figures",
@@ -244,7 +250,9 @@ def fit_model(
         "param_norm": [],
     }
 
-    print(f"\nStarting Training | Epochs: {n_epochs} | Batches: {len(train_ds)}")
+    batches = iter(train_ds)
+
+    print(f"\nStarting Training | Epochs: {n_epochs} | Batches: {steps_per_epoch}")
     print("-" * 80)
 
     for epoch in range(1, n_epochs + 1):
@@ -255,7 +263,8 @@ def fit_model(
             key=subkey,
             train_state=train_state,
             train_step_fn=train_step_fn,
-            train_ds=train_ds,
+            batches=batches,
+            steps=steps_per_epoch,
             epoch=epoch,
             n_epochs=n_epochs,
             lr_schedule=lr_schedule,
