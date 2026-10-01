@@ -85,11 +85,37 @@ def process_features(
     return (features["image"], features["label"])
 
 
+def dihedral_augment(
+    image: np.ndarray, rng: np.random.Generator
+) -> np.ndarray:
+    """One of the 8 rotations/reflections of the image, chosen uniformly.
+
+    A galaxy's orientation on the sky is arbitrary, so every element of the
+    dihedral group of the square maps a training image to an equally valid one.
+    """
+    if bool(rng.integers(2)):
+        image = image[:, ::-1]
+
+    k = int(rng.integers(4))
+    if k:
+        image = np.rot90(image, k=k, axes=(0, 1))
+
+    return np.ascontiguousarray(image)
+
+
+def augment_features(
+    features: Tuple[np.ndarray, np.ndarray], rng: np.random.Generator
+) -> Tuple[np.ndarray, np.ndarray]:
+    image, label = features
+    return (dihedral_augment(image, rng), label)
+
+
 def make_data_loaders(
     db_path: str,
     batch_size: int,
     seed: int = 42,
     image_size: Optional[Tuple[int, int]] = None,
+    augment: bool = True,
 ) -> grain.MapDataset:
     temp_env = lmdb.open(db_path, readonly=True, lock=False)
     with temp_env.begin() as txn:
@@ -102,12 +128,12 @@ def make_data_loaders(
 
     process_fn = partial(process_features, image_size=image_size)
 
-    return (
-        grain.MapDataset.source(source)
-        .shuffle(seed=seed)
-        .map(process_fn)
-        .batch(batch_size=batch_size, drop_remainder=True)
-    )
+    dataset = grain.MapDataset.source(source).shuffle(seed=seed).map(process_fn)
+
+    if augment:
+        dataset = dataset.random_map(augment_features, seed=seed + 1)
+
+    return dataset.batch(batch_size=batch_size, drop_remainder=True)
 
 
 def make_overfit_loader(
