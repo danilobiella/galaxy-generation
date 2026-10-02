@@ -5,14 +5,15 @@ import jax
 import jax.numpy as jnp
 import optax  # type: ignore
 
-from src.config import (BATCH_SIZE, DATA_PATH, DDIM_STEPS, FIGURES_DIR,
+from src.config import (BATCH_SIZE, CHECKPOINT_EVERY, CKPT_DIR, DATA_PATH,
+                        DATA_SEED, DDIM_STEPS, EMA_DECAY, FIGURES_DIR,
                         FINAL_LEARNING_RATE, GRADIENT_PLOT_PATH,
                         GUIDANCE_SCALE, HISTORY_PATH, IMAGE_SIZE,
-                        LEARNING_RATE, LOSS_PLOT_PATH, N_EPOCHS, NUM_CLASSES,
-                        DATA_SEED, ON_KAGGLE, P_UNCOND, RUNS_DIR, SEED,
-                        STATE_PATH,
-                        EMA_DECAY, TIMESTEPS, TRAIN_WEIGHTS_PATH,
-                        WARMUP_STEPS)
+                        KEEP_CHECKPOINTS, LEARNING_RATE, LOSS_PLOT_PATH,
+                        N_EPOCHS, NUM_CLASSES, ON_KAGGLE, P_UNCOND, RESUME,
+                        RUNS_DIR, SEED, STATE_PATH, TIMESTEPS,
+                        TRAIN_WEIGHTS_PATH, WARMUP_STEPS)
+from src import checkpoint
 from src.data_loader import make_data_loaders
 from src.models import build_network  # This now needs to return a U-Net
 from src.plot import plot_gradients, plot_loss
@@ -113,6 +114,39 @@ model_state = init_model_state(rng=jax.random.PRNGKey(SEED))
 train_state = init_train_state(model_state)
 print("Initialized model and training state")
 
+# %% -- checkpoints --------------------------------------------------------
+
+ckpt_mgr = checkpoint.manager(
+    CKPT_DIR, keep=KEEP_CHECKPOINTS, every=CHECKPOINT_EVERY
+)
+
+if not RESUME and ckpt_mgr.latest_step() is not None:
+    raise SystemExit(
+        f"{CKPT_DIR} already holds checkpoints (up to epoch "
+        f"{ckpt_mgr.latest_step()}). Move or delete it to start fresh, or set "
+        "RESUME = True in src/config.py to continue that run."
+    )
+
+meta = checkpoint.run_meta(
+    steps_per_epoch=steps_per_epoch,
+    n_epochs=N_EPOCHS,
+    learning_rate=LEARNING_RATE,
+    warmup_steps=WARMUP_STEPS,
+    final_learning_rate=FINAL_LEARNING_RATE,
+    data_seed=DATA_SEED,
+)
+
+resumed = checkpoint.restore(ckpt_mgr, train_state) if RESUME else None
+if RESUME and resumed is None:
+    print(f"RESUME is set but {CKPT_DIR} holds no checkpoint; starting fresh")
+
+resumed_history = None
+if resumed is not None:
+    checkpoint.check_resumable(resumed.meta, meta)
+    train_state, resumed_history = resumed.train_state, resumed.history
+    print(f"Restored checkpoint at step {int(train_state.step)}")
+
+
 # %% -- train --------------------------------------------------------------
 
 key = jax.random.PRNGKey(SEED)
@@ -126,7 +160,11 @@ state, history = fit_model(
     steps_per_epoch=steps_per_epoch,
     n_epochs=N_EPOCHS,
     figures_dir=str(FIGURES_DIR),
+    history=resumed_history,
+    checkpoint_fn=checkpoint.saver(ckpt_mgr, meta),
 )
+
+ckpt_mgr.close()
 
 # %% save network state and history ----------------------------------------
 

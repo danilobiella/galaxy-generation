@@ -178,7 +178,7 @@ def make_train_fns(
 
 
 def train_epoch(
-    key: jax.Array,
+    base_key: jax.Array,
     train_state: TrainState,
     train_step_fn,
     batches,
@@ -210,7 +210,7 @@ def train_epoch(
         else:
             real_imgs, labels = batch, None
 
-        key, step_key = jax.random.split(key)
+        step_key = jax.random.fold_in(base_key, train_state.step)
         train_state, metrics = train_step_fn(step_key, train_state, real_imgs, labels)
 
         for k, v in metrics.items():
@@ -229,7 +229,7 @@ def train_epoch(
             )
             last_idx = len(epoch_metrics["loss"])
 
-    return train_state, epoch_metrics, key
+    return train_state, epoch_metrics
 
 
 def fit_model(
@@ -243,24 +243,36 @@ def fit_model(
     n_epochs: int = 50,
     print_every: int = 100,
     figures_dir: str = "runs/figures",
+    *,
+    history: dict[str, list[float]] | None = None,
+    checkpoint_fn=None,
 ):
-    history: dict[str, list[float]] = {
-        "loss": [],
-        "grad_norm": [],
-        "param_norm": [],
-    }
+    if history is None:
+        history = {"loss": [], "grad_norm": [], "param_norm": []}
 
+    train_key, sample_key = jax.random.split(key)
+
+    start_step = int(train_state.step)
     batches = iter(train_ds)
+    if start_step:
+        if not hasattr(batches, "set_state"):
+            raise TypeError(
+                f"Cannot resume at step {start_step}: this batch stream cannot be "
+                "positioned. Resuming reads the position from the step count, so "
+                "the stream has to expose `set_state`, as grain's iterators do."
+            )
+        batches.set_state({"next_index": start_step})
+
+    start_epoch = start_step // steps_per_epoch + 1
 
     print(f"\nStarting Training | Epochs: {n_epochs} | Batches: {steps_per_epoch}")
     print("-" * 80)
 
-    for epoch in range(1, n_epochs + 1):
+    for epoch in range(start_epoch, n_epochs + 1):
         start_time = time.time()
 
-        key, subkey = jax.random.split(key)
-        train_state, epoch_data, key = train_epoch(
-            key=subkey,
+        train_state, epoch_data = train_epoch(
+            base_key=train_key,
             train_state=train_state,
             train_step_fn=train_step_fn,
             batches=batches,
@@ -272,13 +284,13 @@ def fit_model(
         )
 
         for key_name, values in epoch_data.items():
-            history[key_name].extend(values)
+            history.setdefault(key_name, []).extend(values)
 
         epoch_time = time.time() - start_time
 
         os.makedirs(figures_dir, exist_ok=True)
         gen_fn(
-            key=key,
+            key=jax.random.fold_in(sample_key, epoch),
             model_state=train_state.model_state._replace(params=train_state.ema_params),
             filepath=f"{figures_dir}/epoch_{epoch}.png",
         )
@@ -289,5 +301,8 @@ def fit_model(
             f"AVG Loss: {avg_loss:.4f}"
         )
         print("-" * 80)
+
+        if checkpoint_fn is not None:
+            checkpoint_fn(epoch, train_state, history, epoch == n_epochs)
 
     return train_state, history

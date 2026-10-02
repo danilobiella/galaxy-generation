@@ -19,6 +19,7 @@ HISTORY_PATH = RUNS_DIR / "history.pkl"
 LOSS_PLOT_PATH = RUNS_DIR / "loss_plot.png"
 GRADIENT_PLOT_PATH = RUNS_DIR / "gradient_plot.png"
 TRAIN_WEIGHTS_PATH = RUNS_DIR / "galaxy_unet.safetensors"
+CKPT_DIR = RUNS_DIR / "ckpt"
 
 WEIGHTS_PATH = CHECKPOINTS_DIR / "galaxy_unet.safetensors"
 
@@ -57,3 +58,7 @@ LEARNING_RATE = 1e-4
 WARMUP_STEPS = 500
 EMA_DECAY = 0.9999
 FINAL_LEARNING_RATE = 1e-6
+
+RESUME = False
+CHECKPOINT_EVERY = 5
+KEEP_CHECKPOINTS = 2

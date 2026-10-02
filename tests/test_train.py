@@ -6,7 +6,7 @@ import numpy as np
 import optax
 import pytest
 
-from diffusion import DiffusionSchedule, make_samplers
+from diffusion import make_samplers
 from train import (
     ModelState,
     TrainState,
@@ -17,54 +17,13 @@ from train import (
     train_epoch,
 )
 
-T = 20
-IMAGE_SHAPE = (8, 8, 3)
-NUM_CLASSES = 4
-
-
-class TinyNetwork:
-    """A learnable stand-in for the U-Net: eps_hat = w * x + b[label].
-
-    Small enough that a training step is instant, but it has real parameters
-    and a real gradient, so the optimiser, the EMA and the loss are all
-    genuinely exercised.
-
-    `b` has one row per class plus the null token, and only the rows actually
-    used get a gradient. That makes `moved_rows` a jit-safe way to see which
-    labels reached the network -- recording them in a Python list would only
-    ever capture tracers, since `train_step` is compiled.
-    """
-
-    def init(self, rng, input):
-        return {"w": jnp.array(0.5), "b": jnp.zeros((NUM_CLASSES + 1,))}
-
-    def apply(self, params, rng, input):
-        x, t, y = input
-        out = params["w"] * x
-        if y is not None:
-            out = out + params["b"][y].reshape(-1, 1, 1, 1)
-        return out
+from conftest import IMAGE_SHAPE, NUM_CLASSES, TinyNetwork
 
 
 def moved_rows(before, after) -> set[int]:
     """Which rows of `b` the optimiser touched, i.e. which labels were seen."""
     delta = np.asarray(after["b"]) - np.asarray(before["b"])
     return set(np.flatnonzero(delta).tolist())
-
-
-@pytest.fixture
-def net():
-    return TinyNetwork()
-
-
-@pytest.fixture
-def sched():
-    return DiffusionSchedule.create(T=T)
-
-
-@pytest.fixture
-def batch():
-    return jax.random.normal(jax.random.key(0), (4, *IMAGE_SHAPE))
 
 
 def make_trainer(net, sched, num_classes=None, ema_decay=0.9999, p_uncond=0.1, lr=0.1):
@@ -275,7 +234,7 @@ class TestEmaUpdate:
 class TestTrainEpoch:
     def test_consumes_every_batch(self, net, sched, batch):
         state, step_fn = make_trainer(net, sched)
-        state, metrics, _ = train_epoch(
+        state, metrics = train_epoch(
             jax.random.key(0), state, step_fn, iter([batch] * 4), 4, 1, 1, lambda s: 1e-4
         )
         assert len(metrics["loss"]) == 4
@@ -285,7 +244,7 @@ class TestTrainEpoch:
         """A (images, labels) batch must reach the step as a label, not be eaten."""
         state, step_fn = make_trainer(net, sched, num_classes=NUM_CLASSES, p_uncond=0.0)
         labels = jnp.array([0, 1, 1, 1], jnp.int32)
-        after, _, _ = train_epoch(
+        after, _ = train_epoch(
             jax.random.key(0),
             state,
             step_fn,
@@ -297,19 +256,39 @@ class TestTrainEpoch:
         )
         assert moved_rows(state.model_state.params, after.model_state.params) == {0, 1}
 
-    def test_returns_a_fresh_key(self, net, sched, batch):
+    def test_per_step_keys_are_derived_from_the_step_not_threaded(
+        self, net, sched, batch
+    ):
+        """Each step must draw differently, and the draw must depend only on
+        (base_key, state.step) -- that is what makes a resumed run identical to
+        an uninterrupted one without checkpointing the key."""
         state, step_fn = make_trainer(net, sched)
-        key = jax.random.key(0)
-        _, _, out_key = train_epoch(
-            key, state, step_fn, iter([batch]), 1, 1, 1, lambda s: 1e-4
+
+        def keys_of_one_epoch():
+            seen = []
+
+            def recording_step(key, s, imgs, labels=None):
+                seen.append(np.asarray(jax.random.key_data(key)).copy())
+                return step_fn(key, s, imgs, labels)
+
+            train_epoch(
+                jax.random.key(0), state, recording_step, iter([batch] * 3), 3, 1, 1,
+                lambda s: 1e-4,
+            )
+            return seen
+
+        first, again = keys_of_one_epoch(), keys_of_one_epoch()
+
+        assert not any(
+            np.array_equal(a, b)
+            for i, a in enumerate(first)
+            for b in first[i + 1 :]
         )
-        assert not np.array_equal(
-            np.asarray(jax.random.key_data(key)), np.asarray(jax.random.key_data(out_key))
-        )
+        assert all(np.array_equal(a, b) for a, b in zip(first, again))
 
     def test_collects_all_three_metrics(self, net, sched, batch):
         state, step_fn = make_trainer(net, sched)
-        _, metrics, _ = train_epoch(
+        _, metrics = train_epoch(
             jax.random.key(0), state, step_fn, iter([batch] * 2), 2, 1, 1, lambda s: 1e-4
         )
         assert set(metrics) == {"loss", "grad_norm", "param_norm"}

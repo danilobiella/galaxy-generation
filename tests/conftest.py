@@ -2,6 +2,7 @@ import os
 
 os.environ.setdefault("JAX_PLATFORMS", "cpu")
 
+import jax
 import jax.numpy as jnp
 import pytest
 
@@ -41,9 +42,49 @@ def constant_unet(eps):
     return StubUNet(eps_fn)
 
 
+class TinyNetwork:
+    """A learnable stand-in for the U-Net: eps_hat = w * x + b[label].
+
+    Small enough that a training step is instant, but it has real parameters
+    and a real gradient, so the optimiser, the EMA and the loss are all
+    genuinely exercised.
+
+    `b` has one row per class plus the null token, and only the rows actually
+    used get a gradient. That makes `moved_rows` a jit-safe way to see which
+    labels reached the network -- recording them in a Python list would only
+    ever capture tracers, since `train_step` is compiled.
+    """
+
+    def init(self, rng, input):
+        return {"w": jnp.array(0.5), "b": jnp.zeros((NUM_CLASSES + 1,))}
+
+    def apply(self, params, rng, input):
+        x, t, y = input
+        out = params["w"] * x
+        if y is not None:
+            out = out + params["b"][y].reshape(-1, 1, 1, 1)
+        return out
+
+
 @pytest.fixture
 def schedule():
     return DiffusionSchedule.create(T=T)
+
+
+@pytest.fixture
+def sched(schedule):
+    """The same schedule; the training and checkpoint tests spell it this way."""
+    return schedule
+
+
+@pytest.fixture
+def net():
+    return TinyNetwork()
+
+
+@pytest.fixture
+def batch():
+    return jax.random.normal(jax.random.key(0), (4, *IMAGE_SHAPE))
 
 
 @pytest.fixture

@@ -271,3 +271,33 @@ class TestPerEpochRandomness:
             images, labels = run_epoch(ds, epoch)
             for image, label in zip(images, labels):
                 assert label == sample_id(image) % NUM_CLASSES
+
+
+class TestResumePosition:
+    """`fit_model` restores its place in the stream from `TrainState.step` alone,
+    with `set_state({"next_index": step})`. These pin the properties that makes
+    sound, so a grain upgrade that renamed the key or changed its meaning fails
+    here rather than training silently on the wrong data.
+    """
+
+    def test_next_index_counts_batches_consumed(self, make_lmdb):
+        data = make_data_loaders(make_lmdb(24), batch_size=4, seed=0)
+        batches = iter(data.batches)
+        for consumed in range(5):
+            assert batches.get_state()["next_index"] == consumed
+            next(batches)
+
+    @pytest.mark.parametrize("offset", [0, 5])
+    def test_setting_next_index_resumes_the_identical_stream(self, make_lmdb, offset):
+        """Offset 5 crosses an epoch boundary, since 24 samples at batch 4 is 6
+        batches an epoch. Offset 0 must be a no-op, which is what lets the
+        training loop seek unconditionally with no `if resuming` branch."""
+        data = make_data_loaders(make_lmdb(24), batch_size=4, seed=0)
+        straight = [np.asarray(b[0]) for b in itertools.islice(iter(data.batches), 9)]
+
+        batches = iter(data.batches)
+        batches.set_state({"next_index": offset})
+        resumed = [np.asarray(b[0]) for b in itertools.islice(batches, 4)]
+
+        assert len(resumed) == 4
+        assert all(np.array_equal(a, b) for a, b in zip(straight[offset:], resumed))

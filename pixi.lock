@@ -1831,7 +1831,7 @@ packages:
 - pypi: ./
   name: galaxy-generation
   version: 0.1.0
-  sha256: b1a8f865ce191012ec2605784cf56c0d6ee86b387c70eb3549683d9664c9df22
+  sha256: 023addde177e46c453fd605c62ec13f19bc461d4262004e12a640607d0bdc9cf
   requires_dist:
   - imageio[ffmpeg]
   requires_python: '>=3.11'
