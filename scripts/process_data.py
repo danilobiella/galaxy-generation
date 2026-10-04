@@ -1,52 +1,57 @@
+"""Convert the Galaxy10 DECals HDF5 release into an LMDB keyed by sample index."""
+
 import pickle
 
 import h5py
 import lmdb
+import numpy as np
 from tqdm import tqdm
 
+from config import LOCAL_DATA_PATH
 
-def convert_h5_to_lmdb(h5_path, lmdb_path):
-    # 1. READ ENTIRE DATASET INTO RAM (This is the #1 speedup)
+H5_PATH = "data/Galaxy10_DECals.h5"
+METADATA_KEY = b"__metadata__"
+
+
+def load_h5(h5_path: str) -> tuple[np.ndarray, np.ndarray]:
     print(f"Loading {h5_path} into memory...")
     with h5py.File(h5_path, "r") as h5:
-        # Adding [:] at the end forces h5py to load the data into a Numpy array
-        images = h5["images"][:]
-        labels = h5["ans"][:]
-        num_samples = images.shape[0]
+        images, labels = h5["images"][:], h5["ans"][:]
 
-    # 2. OPEN LMDB WITH OPTIMIZED FLAGS
-    # writemap: Uses a writeable memory map (much faster)
-    # map_async: Non-blocking disk flushes
-    map_size = 10 * 1024**3
+    if len(images) != len(labels):
+        raise ValueError(
+            f"{h5_path} has {len(images)} images but {len(labels)} labels"
+        )
+
+    return images, labels
+
+
+def write_samples(
+    txn: lmdb.Transaction, images: np.ndarray, labels: np.ndarray
+) -> None:
+    for i in tqdm(range(len(images)), desc="Writing to LMDB", unit="img"):
+        sample = {"img": images[i], "label": int(labels[i])}
+        txn.put(f"{i}".encode(), pickle.dumps(sample, protocol=pickle.HIGHEST_PROTOCOL))
+
+
+def convert_h5_to_lmdb(h5_path: str, lmdb_path: str) -> None:
+    images, labels = load_h5(h5_path)
+
+    print(f"Starting conversion of {len(images)} samples...")
     env = lmdb.open(
-        lmdb_path, map_size=map_size, writemap=True, map_async=True, meminit=False
+        lmdb_path, map_size=10 * 1024**3, writemap=True, map_async=True, meminit=False
     )
-
-    print(f"Starting conversion of {num_samples} samples...")
-
-    with env.begin(write=True) as txn:
-        # Use pickle.HIGHEST_PROTOCOL for speed
-        protocol = pickle.HIGHEST_PROTOCOL
-
-        for i in tqdm(range(num_samples), desc="Writing to LMDB", unit="img"):
-            sample = {"img": images[i], "label": int(labels[i])}
-
-            # Using f-strings and standard encoding
-            txn.put(f"{i}".encode(), pickle.dumps(sample, protocol=protocol))
-
-        # Store metadata dynamically
+    with env, env.begin(write=True) as txn:
+        write_samples(txn, images, labels)
         metadata = {
-            "num_samples": num_samples,
+            "num_samples": len(images),
             "shape": images.shape[1:],
             "dtype": str(images.dtype),
         }
-        txn.put(b"__metadata__", pickle.dumps(metadata, protocol=protocol))
+        txn.put(METADATA_KEY, pickle.dumps(metadata, protocol=pickle.HIGHEST_PROTOCOL))
 
-    print("\nConversion complete! Closing LMDB.")
-    env.close()
+    print("\nConversion complete!")
 
 
 if __name__ == "__main__":
-    h5_path = "data/Galaxy10_DECals.h5"
-    lmdb_path = "data/galaxy10_decals_lmdb"
-    convert_h5_to_lmdb(h5_path, lmdb_path)
+    convert_h5_to_lmdb(H5_PATH, LOCAL_DATA_PATH)
