@@ -64,7 +64,6 @@ test:
 	@echo "$(GREEN)Running tests...$(RESET)"
 	JAX_PLATFORMS=cpu pytest -q
 
-# One epoch of a small model into runs/smoke (autotuning off for the local MX150)
 smoke:
 	@echo "$(GREEN)Running smoke training...$(RESET)"
 	rm -rf runs/smoke

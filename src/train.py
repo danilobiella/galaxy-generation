@@ -204,8 +204,9 @@ def make_eval_fn(
         return error.reshape(n_t, -1).mean(axis=1)
 
     def eval_fn(epoch, train_state):
+        params = train_state.model_state.params
         per_batch = [
-            eval_batch(train_state.ema_params, x, y, jax.random.fold_in(key, i))
+            eval_batch(params, x, y, jax.random.fold_in(key, i))
             for i, (x, y) in enumerate(val_batches)
         ]
         per_t = np.mean(jax.device_get(per_batch), axis=0)
