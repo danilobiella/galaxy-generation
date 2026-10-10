@@ -14,7 +14,7 @@ DOCKER_IMAGE := galaxy-api
 HF_SPACE := galaxy-generation
 
 .PHONY: data kaggle-dataset-stage kaggle-dataset-push kaggle-dataset-clean \
-        kaggle-stage kaggle-push kaggle-clean test api api-cpu \
+        kaggle-stage kaggle-push kaggle-clean test smoke api api-cpu \
         docker-build docker-run hf-check hf-deploy
 
 data: $(BIN_DATA_FILES)
@@ -63,6 +63,12 @@ kaggle-clean:
 test:
 	@echo "$(GREEN)Running tests...$(RESET)"
 	JAX_PLATFORMS=cpu pytest -q
+
+# One epoch of a small model into runs/smoke (autotuning off for the local MX150)
+smoke:
+	@echo "$(GREEN)Running smoke training...$(RESET)"
+	rm -rf runs/smoke
+	SMOKE=1 XLA_FLAGS=--xla_gpu_autotune_level=0 python main.py
 
 # Serve the model
 api:
