@@ -20,6 +20,8 @@ platforms = ["linux-64"]
 [tool.pixi.pypi-dependencies]
 galaxy_generation = { path = ".", editable = true }
 kaggle-bundler = { git = "https://github.com/danilobiella/kaggle-bundler.git" }
+orbax-checkpoint = ">=0.11.13,<0.12"
+dm-haiku = ">=0.0.16,<0.0.17"
 
 [tool.pixi.dependencies]
 jaxlib = { version = ">=0.6.0,<0.7.0", build = "*cuda12*" }
@@ -27,7 +29,6 @@ cuda-nvcc = ">=12.0,<13"
 jax = ">=0.6.0,<0.7"
 numpy = ">=2.4.3,<3"
 optax = ">=0.2.8,<0.3"
-dm-haiku = ">=0.0.16,<0.0.17"
 grain = ">=0.2.16,<0.3"
 pynvim = ">=0.6.0,<0.7"
 mypy = ">=1.20.0,<2"
@@ -49,7 +50,6 @@ fastapi = ">=0.141.1,<0.142"
 uvicorn = ">=0.52.1,<0.53"
 pillow = ">=12.3.0,<13"
 pytest = ">=9.1.1,<10"
-orbax-checkpoint = ">=0.9.0,<0.10"
 
 [tool.pixi.tasks]
 
