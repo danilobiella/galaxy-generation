@@ -17,7 +17,7 @@ import orbax.checkpoint as ocp  # type: ignore
 class Resumed(NamedTuple):
     train_state: Any
     history: dict[str, list[float]]
-    meta: dict[str, float]
+    meta: dict[str, Any]
 
 
 def run_meta(
@@ -28,14 +28,18 @@ def run_meta(
     warmup_steps: int,
     final_learning_rate: float,
     data_seed: int,
-) -> dict[str, float]:
+    val_fraction: float,
+    split_seed: int,
+    val_split_hash: str,
+) -> dict[str, Any]:
     """What a resume cannot change, because none of it is in the checkpoint.
 
     The learning-rate schedule is rebuilt from config and replayed by step, so
     every input to it has to match. `steps_per_epoch` counts twice over -- it
     sets `decay_steps` with `n_epochs`, and the epoch number is derived from it.
     `data_seed` is here because the stream is resumed by position: the same
-    index into a differently shuffled epoch is a different sample.
+    index into a differently shuffled epoch is a different sample. The split
+    fields keep validation images from moving into training on a resume.
     """
     return {
         "steps_per_epoch": steps_per_epoch,
@@ -44,6 +48,9 @@ def run_meta(
         "warmup_steps": warmup_steps,
         "final_learning_rate": final_learning_rate,
         "data_seed": data_seed,
+        "val_fraction": val_fraction,
+        "split_seed": split_seed,
+        "val_split_hash": val_split_hash,
     }
 
 
@@ -66,7 +73,7 @@ def save(
     epoch: int,
     train_state: Any,
     history: dict[str, list[float]],
-    meta: dict[str, float],
+    meta: dict[str, Any],
     force: bool = False,
 ) -> bool:
     return mgr.save(
@@ -80,7 +87,7 @@ def save(
     )
 
 
-def saver(mgr: ocp.CheckpointManager, meta: dict[str, float]) -> Callable:
+def saver(mgr: ocp.CheckpointManager, meta: dict[str, Any]) -> Callable:
     """The per-epoch callback `fit_model` wants, with the run's constants bound."""
 
     def save_checkpoint(epoch, train_state, history, is_last):
@@ -119,7 +126,7 @@ def restore(mgr: ocp.CheckpointManager, abstract_state: Any) -> Resumed | None:
     return Resumed(restored["state"], restored["history"], restored["meta"])
 
 
-def check_resumable(saved: dict[str, float], current: dict[str, float]) -> None:
+def check_resumable(saved: dict[str, Any], current: dict[str, Any]) -> None:
     changed = {k: (saved.get(k), v) for k, v in current.items() if saved.get(k) != v}
     if changed:
         detail = ", ".join(

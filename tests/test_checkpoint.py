@@ -14,6 +14,9 @@ META = run_meta(
     warmup_steps=0,
     final_learning_rate=1e-6,
     data_seed=0,
+    val_fraction=0.1,
+    split_seed=0,
+    val_split_hash="abc123",
 )
 
 
@@ -253,6 +256,9 @@ class TestCheckResumable:
             ("warmup_steps", 10),
             ("final_learning_rate", 1e-5),
             ("data_seed", 7),
+            ("val_fraction", 0.2),
+            ("split_seed", 1),
+            ("val_split_hash", "def456"),
         ],
     )
     def test_rejects_any_changed_schedule_input(self, field, value):

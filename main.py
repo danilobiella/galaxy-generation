@@ -6,31 +6,35 @@ import jax.numpy as jnp
 import optax  # type: ignore
 
 from src.config import (BATCH_SIZE, CHECKPOINT_EVERY, CKPT_DIR, DATA_PATH,
-                        DATA_SEED, DDIM_STEPS, EMA_DECAY, FIGURES_DIR,
-                        FINAL_LEARNING_RATE, GRADIENT_PLOT_PATH,
+                        DATA_SEED, DDIM_STEPS, EMA_DECAY, EVAL_TIMESTEPS,
+                        FIGURES_DIR, FINAL_LEARNING_RATE, GRADIENT_PLOT_PATH,
                         GUIDANCE_SCALE, HISTORY_PATH, IMAGE_SIZE,
                         KEEP_CHECKPOINTS, LEARNING_RATE, LOSS_PLOT_PATH,
-                        N_EPOCHS, NUM_CLASSES, ON_KAGGLE, P_UNCOND, RESUME,
-                        RUNS_DIR, SEED, STATE_PATH, TIMESTEPS,
-                        TRAIN_WEIGHTS_PATH, WARMUP_STEPS)
+                        MODEL_DIM, MODEL_DIM_MULTS, N_EPOCHS, NUM_CLASSES,
+                        ON_KAGGLE, P_UNCOND, RESUME, RUNS_DIR, SEED,
+                        SPLIT_SEED, STATE_PATH, TIMESTEPS, TRAIN_WEIGHTS_PATH,
+                        VAL_FRACTION, WARMUP_STEPS)
 from src import checkpoint
-from src.data_loader import make_data_loaders
+from src.data_loader import close_envs, make_data_splits
 from src.models import build_network  # This now needs to return a U-Net
 from src.plot import plot_gradients, plot_loss
-from src.diffusion import DiffusionSchedule, make_samplers
-from src.train import fit_model, make_model_fns, make_train_fns
+from src.diffusion import DiffusionSchedule, ddim_timesteps, make_samplers
+from src.train import fit_model, make_eval_fn, make_model_fns, make_train_fns
 from src.weights import save_params
 
 print("Running on Kaggle" if ON_KAGGLE else "Running locally")
 
 # %% -- data ---------------------------------------------------------------
 
-training_data = make_data_loaders(
+splits = make_data_splits(
     db_path=DATA_PATH,
     batch_size=BATCH_SIZE,
+    val_fraction=VAL_FRACTION,
+    split_seed=SPLIT_SEED,
     seed=DATA_SEED,
     image_size=(IMAGE_SIZE[0], IMAGE_SIZE[1]),
 )
+training_data = splits.train
 
 steps_per_epoch = training_data.steps_per_epoch
 n_steps = N_EPOCHS * steps_per_epoch
@@ -41,10 +45,16 @@ print(f"Total training steps: {n_steps}")
 print("Made data loader")
 print(f"Number of training batches: {steps_per_epoch}")
 print(f"Number of training samples: {steps_per_epoch * BATCH_SIZE}")
+print(
+    f"Validation: {len(splits.val)} batches, {len(splits.val) * BATCH_SIZE} "
+    f"samples | split hash {splits.val_hash}"
+)
 
 # %% -- model and optimizer setup -------------------------------------------
 
-unet = build_network(num_classes=NUM_CLASSES)
+unet = build_network(
+    num_classes=NUM_CLASSES, dim=MODEL_DIM, dim_mults=MODEL_DIM_MULTS
+)
 print(f"Built U-Net network (num_classes={NUM_CLASSES})")
 
 # The U-Net takes (images, timesteps)
@@ -134,6 +144,9 @@ meta = checkpoint.run_meta(
     warmup_steps=WARMUP_STEPS,
     final_learning_rate=FINAL_LEARNING_RATE,
     data_seed=DATA_SEED,
+    val_fraction=VAL_FRACTION,
+    split_seed=SPLIT_SEED,
+    val_split_hash=splits.val_hash,
 )
 
 resumed = checkpoint.restore(ckpt_mgr, train_state) if RESUME else None
@@ -149,6 +162,15 @@ if resumed is not None:
 
 # %% -- train --------------------------------------------------------------
 
+eval_fn = make_eval_fn(
+    unet=unet,
+    schedule=diffusion_schedule,
+    val_batches=splits.val,
+    key=jax.random.PRNGKey(SPLIT_SEED),
+    timesteps=ddim_timesteps(TIMESTEPS, EVAL_TIMESTEPS),
+    num_classes=NUM_CLASSES,
+)
+
 key = jax.random.PRNGKey(SEED)
 state, history = fit_model(
     key=key,
@@ -162,9 +184,11 @@ state, history = fit_model(
     figures_dir=str(FIGURES_DIR),
     history=resumed_history,
     checkpoint_fn=checkpoint.saver(ckpt_mgr, meta),
+    eval_fn=eval_fn,
 )
 
 ckpt_mgr.close()
+close_envs()
 
 # %% save network state and history ----------------------------------------
 

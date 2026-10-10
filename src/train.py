@@ -90,6 +90,19 @@ def make_model_fns(
     return init_model_state, generate_and_save_images
 
 
+def noise_prediction_error(unet, schedule, params, x_0, t, epsilon, y):
+    # Fetch cumulative alpha and reshape for broadcasting (B, 1, 1, 1)
+    a_hat_t = schedule.alpha_hat[t][:, None, None, None]
+
+    # Forward process: Corrupt images to timestep t (Reparameterization Trick)
+    x_t = jnp.sqrt(a_hat_t) * x_0 + jnp.sqrt(1.0 - a_hat_t) * epsilon
+
+    # Predict the added noise using the U-Net
+    eps_hat = unet.apply(params, None, (x_t, t, y))
+
+    return jnp.square(epsilon - eps_hat)
+
+
 def make_train_fns(
     unet: hk.Transformed,
     optimizer: optax.GradientTransformation,
@@ -134,13 +147,7 @@ def make_train_fns(
             # 2. Sample Gaussian noise to add to the images
             epsilon = jax.random.normal(noise_key, real_imgs.shape)
 
-            # 3. Fetch cumulative alpha and reshape for broadcasting (B, 1, 1, 1)
-            a_hat_t = schedule.alpha_hat[t][:, None, None, None]
-
-            # 4. Forward process: Corrupt images to timestep t (Reparameterization Trick)
-            x_t = jnp.sqrt(a_hat_t) * real_imgs + jnp.sqrt(1.0 - a_hat_t) * epsilon
-
-            # 5. Drop the label on a fraction of the batch so the same network
+            # 3. Drop the label on a fraction of the batch so the same network
             # also learns the unconditional score needed by guided sampling
             if num_classes is None:
                 y = None
@@ -148,12 +155,10 @@ def make_train_fns(
                 dropped = jax.random.uniform(drop_key, (batch_size,)) < p_uncond
                 y = jnp.where(dropped, num_classes, labels.astype(jnp.int32))
 
-            # 6. Predict the added noise using the U-Net
-            input = (x_t, t, y)
-            eps_hat = unet.apply(params, None, input)
-
-            # 7. Simple MSE Loss
-            return jnp.mean(jnp.square(epsilon - eps_hat))
+            # 4. Simple MSE Loss
+            return jnp.mean(
+                noise_prediction_error(unet, schedule, params, real_imgs, t, epsilon, y)
+            )
 
         loss, grads = jax.value_and_grad(loss_fn)(state.model_state.params, key)
         updates, new_opt_state = optimizer.update(
@@ -175,6 +180,42 @@ def make_train_fns(
         ), metrics
 
     return init_train_state, train_step
+
+
+def make_eval_fn(
+    unet: hk.Transformed,
+    schedule: DiffusionSchedule,
+    val_batches,
+    key: jax.Array,
+    timesteps,
+    num_classes: int | None = None,
+):
+    ts = jnp.asarray(timesteps, dtype=jnp.int32)
+    n_t = ts.shape[0]
+
+    @jax.jit
+    def eval_batch(params, imgs, labels, batch_key):
+        batch_size = imgs.shape[0]
+        x_0 = jnp.tile(imgs, (n_t, 1, 1, 1))
+        t = jnp.repeat(ts, batch_size)
+        epsilon = jax.random.normal(batch_key, x_0.shape)
+        y = None if num_classes is None else jnp.tile(labels.astype(jnp.int32), n_t)
+        error = noise_prediction_error(unet, schedule, params, x_0, t, epsilon, y)
+        return error.reshape(n_t, -1).mean(axis=1)
+
+    def eval_fn(epoch, train_state):
+        per_batch = [
+            eval_batch(train_state.ema_params, x, y, jax.random.fold_in(key, i))
+            for i, (x, y) in enumerate(val_batches)
+        ]
+        per_t = np.mean(jax.device_get(per_batch), axis=0)
+        metrics = {"val_mse": float(per_t.mean())}
+        metrics.update(
+            {f"val_mse_t{int(t)}": float(v) for t, v in zip(timesteps, per_t)}
+        )
+        return metrics
+
+    return eval_fn
 
 
 def train_epoch(
@@ -246,6 +287,7 @@ def fit_model(
     *,
     history: dict[str, list[float]] | None = None,
     checkpoint_fn=None,
+    eval_fn=None,
 ):
     if history is None:
         history = {"loss": [], "grad_norm": [], "param_norm": []}
@@ -295,10 +337,22 @@ def fit_model(
             filepath=f"{figures_dir}/epoch_{epoch}.png",
         )
 
+        val_msg = ""
+        if eval_fn is not None:
+            eval_start = time.time()
+            val_metrics = eval_fn(epoch, train_state)
+            for key_name, value in val_metrics.items():
+                history.setdefault(key_name, []).append(value)
+            if "val_mse" in val_metrics:
+                val_msg = (
+                    f" | Val MSE: {val_metrics['val_mse']:.4f} "
+                    f"({time.time() - eval_start:.1f}s)"
+                )
+
         avg_loss = np.mean(epoch_data["loss"])
         print(
             f"[EPOCH {epoch}] COMPLETED | Time: {epoch_time:.1f}s | "
-            f"AVG Loss: {avg_loss:.4f}"
+            f"AVG Loss: {avg_loss:.4f}{val_msg}"
         )
         print("-" * 80)
 

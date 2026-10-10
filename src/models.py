@@ -182,7 +182,11 @@ class UNet(hk.Module):
         return x
 
 
-def build_network(num_classes: int | None = None):
+def build_network(
+    num_classes: int | None = None,
+    dim: int = 64,
+    dim_mults: tuple[int, ...] = (1, 2, 4, 8),
+):
     """Haiku-transformed U-Net taking `(images, timesteps, labels)`.
 
     `num_classes=None` builds the unconditional model, with exactly the same
@@ -193,8 +197,8 @@ def build_network(num_classes: int | None = None):
     @hk.transform
     def unet(input):
         model = UNet(
-            dim=64,
-            dim_mults=(1, 2, 4, 8),
+            dim=dim,
+            dim_mults=dim_mults,
             out_channels=3,
             num_classes=num_classes,
         )

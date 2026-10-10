@@ -6,12 +6,13 @@ import numpy as np
 import optax
 import pytest
 
-from diffusion import make_samplers
+from diffusion import ddim_timesteps, make_samplers
 from train import (
     ModelState,
     TrainState,
     fit_model,
     get_global_norm,
+    make_eval_fn,
     make_model_fns,
     make_train_fns,
     train_epoch,
@@ -385,3 +386,45 @@ class TestFitModel:
         )
         assert seen[0] == pytest.approx(float(final.ema_params["w"]))
         assert seen[0] != pytest.approx(float(final.model_state.params["w"]))
+
+    def test_evaluates_once_per_epoch_into_history(self, net, sched, batch, tmp_path):
+        state, step_fn = make_trainer(net, sched)
+        epochs_seen = []
+
+        def eval_fn(epoch, train_state):
+            epochs_seen.append(epoch)
+            return {"val_mse": float(epoch)}
+
+        _, history = fit_model(
+            jax.random.key(0),
+            state,
+            step_fn,
+            gen_fn=lambda key, model_state, filepath: None,
+            lr_schedule=lambda s: 1e-4,
+            train_ds=itertools.repeat(batch),
+            steps_per_epoch=2,
+            n_epochs=3,
+            figures_dir=str(tmp_path / "figures"),
+            eval_fn=eval_fn,
+        )
+        assert epochs_seen == [1, 2, 3]
+        assert history["val_mse"] == [1.0, 2.0, 3.0]
+        assert len(history["loss"]) == 6
+
+
+class TestEvalFn:
+    def test_is_deterministic_and_reports_each_timestep(self, net, sched, batch):
+        state, _ = make_trainer(net, sched, num_classes=NUM_CLASSES)
+        labels = jnp.arange(batch.shape[0]) % NUM_CLASSES
+        timesteps = ddim_timesteps(sched.T, 4)
+        eval_fn = make_eval_fn(
+            net, sched, [(batch, labels)] * 3, jax.random.key(0), timesteps, NUM_CLASSES
+        )
+
+        first = eval_fn(1, state)
+        second = eval_fn(2, state)
+
+        assert first == second
+        per_t = [first[f"val_mse_t{int(t)}"] for t in timesteps]
+        assert len(per_t) == 4
+        assert first["val_mse"] == pytest.approx(np.mean(per_t))
