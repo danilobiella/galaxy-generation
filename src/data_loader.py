@@ -57,13 +57,6 @@ class GalaxyLMDBDataSource(grain.RandomAccessDataSource):
     db_path: str
     indices: np.ndarray
 
-    def __post_init__(self):
-        with open_env(self.db_path).begin() as txn:
-            meta_bytes = txn.get(b"__metadata__")
-            if meta_bytes is None:
-                raise ValueError("LMDB does not contain '__metadata__' key!")
-            self.metadata = pickle.loads(meta_bytes)
-
     def __len__(self) -> int:
         return len(self.indices)
 
@@ -154,8 +147,10 @@ class DataSplits:
 
 def _num_samples(db_path: str) -> int:
     with open_env(db_path).begin() as txn:
-        meta = pickle.loads(txn.get(b"__metadata__"))
-    return meta["num_samples"]
+        meta_bytes = txn.get(b"__metadata__")
+    if meta_bytes is None:
+        raise ValueError("LMDB does not contain '__metadata__' key!")
+    return pickle.loads(meta_bytes)["num_samples"]
 
 
 def read_labels(db_path: str) -> np.ndarray:
@@ -267,10 +262,9 @@ def make_overfit_loader(
 
     print(f"Searching for {num_samples} samples of class {target_class}...")
 
-    with temp_env.begin() as txn:
-        meta = pickle.loads(txn.get(b"__metadata__"))
-        total_available = meta["num_samples"]
+    total_available = _num_samples(db_path)
 
+    with temp_env.begin() as txn:
         for i in range(total_available):
             byteflow = txn.get(f"{i}".encode())
             sample = pickle.loads(byteflow)
