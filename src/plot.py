@@ -1,7 +1,14 @@
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
+from matplotlib.colors import LinearSegmentedColormap
 
 WINDOW = 100
+TIMESTEP_RAMP = LinearSegmentedColormap.from_list(
+    "timestep",
+    ["#86b6ef", "#6da7ec", "#5598e7", "#3987e5", "#2a78d6",
+     "#256abf", "#1c5cab", "#184f95", "#104281", "#0d366b"],
+)
 
 
 def _smooth(values: list[float], window: int = WINDOW) -> pd.Series:
@@ -9,21 +16,6 @@ def _smooth(values: list[float], window: int = WINDOW) -> pd.Series:
     series = pd.Series(values)
     window = min(window, max(1, len(series) // 10))
     return series.rolling(window=window, min_periods=1).mean()
-
-
-def plot_loss(history: dict, filepath: str = "loss_plot.png", window: int = WINDOW):
-    plt.figure(figsize=(8, 4))
-
-    loss = history["loss"]
-    plt.plot(loss, color="darkgreen", alpha=0.15, linewidth=0.5)
-    plt.plot(_smooth(loss, window), label="loss", color="darkgreen")
-
-    plt.yscale("log")
-    plt.legend()
-    plt.xlabel("step")
-    plt.ylabel("MSE (noise prediction)")
-    plt.tight_layout()
-    plt.savefig(filepath, dpi=300)
 
 
 def plot_gradients(
@@ -44,5 +36,34 @@ def plot_gradients(
     ax_param.set_xlabel("step")
     ax_param.legend()
 
+    fig.tight_layout()
+    fig.savefig(filepath, dpi=300)
+
+
+def plot_loss(history: dict, filepath: str = "loss_plot.png"):
+    prefix = "val_mse_t"
+    keys = sorted(
+        (k for k in history if k.startswith(prefix)), key=lambda k: int(k[len(prefix):])
+    )
+    val_mse = history["val_mse"]
+    epochs = np.arange(1, len(val_mse) + 1)
+    train_mse = np.asarray(history["loss"]).reshape(len(val_mse), -1).mean(axis=1)
+    colors = TIMESTEP_RAMP(np.linspace(0.0, 1.0, len(keys)))
+
+    fig, ax = plt.subplots(figsize=(9, 4.5))
+    ax.plot(epochs, train_mse, linewidth=2, color="#eb6834", label="train (epoch mean)")
+    ax.plot(epochs, val_mse, linewidth=2, color="#2b2b2b", label="val (mean)")
+    for key, color in zip(keys, colors):
+        ax.plot(
+            epochs, history[key], linestyle="--", linewidth=1,
+            color=color, label=f"val t = {key[len(prefix):]}",
+        )
+
+    ax.set_yscale("log")
+    ax.grid(alpha=0.3, linewidth=0.5)
+    ax.set_xticks(epochs)
+    ax.set_xlabel("epoch")
+    ax.set_ylabel("MSE (noise prediction)")
+    ax.legend(loc="center left", bbox_to_anchor=(1.01, 0.5))
     fig.tight_layout()
     fig.savefig(filepath, dpi=300)

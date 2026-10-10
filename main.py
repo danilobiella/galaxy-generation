@@ -3,6 +3,7 @@ import pickle
 import haiku as hk
 import jax
 import jax.numpy as jnp
+import numpy as np
 import optax  # type: ignore
 
 from src.config import (BATCH_SIZE, CHECKPOINT_EVERY, CKPT_DIR, DATA_PATH,
@@ -18,7 +19,7 @@ from src import checkpoint
 from src.data_loader import close_envs, make_data_splits
 from src.models import build_network  # This now needs to return a U-Net
 from src.plot import plot_gradients, plot_loss
-from src.diffusion import DiffusionSchedule, ddim_timesteps, make_samplers
+from src.diffusion import DiffusionSchedule, make_samplers
 from src.train import fit_model, make_eval_fn, make_model_fns, make_train_fns
 from src.weights import save_params
 
@@ -167,7 +168,8 @@ eval_fn = make_eval_fn(
     schedule=diffusion_schedule,
     val_batches=splits.val,
     key=jax.random.PRNGKey(SPLIT_SEED),
-    timesteps=ddim_timesteps(TIMESTEPS, EVAL_TIMESTEPS),
+    timesteps=np.arange(EVAL_TIMESTEPS) * (TIMESTEPS // EVAL_TIMESTEPS)
+    + TIMESTEPS // (2 * EVAL_TIMESTEPS),
     num_classes=NUM_CLASSES,
 )
 

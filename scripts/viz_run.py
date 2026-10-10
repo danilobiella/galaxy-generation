@@ -160,7 +160,7 @@ def main() -> None:
     summarize(history, run_dir)
 
     written = [run_dir / "loss_plot.png", run_dir / "gradient_plot.png"]
-    plot_loss(history, str(written[0]), window=args.window)
+    plot_loss(history, str(written[0]))
     plot_gradients(history, str(written[1]), window=args.window)
 
     sheet = run_dir / "samples_by_epoch.png"
