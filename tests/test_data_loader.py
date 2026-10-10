@@ -1,11 +1,23 @@
 import itertools
+import multiprocessing
+import operator
 import pickle
+from concurrent.futures import ProcessPoolExecutor
 
 import lmdb
 import numpy as np
 import pytest
 
-from data_loader import augment_features, dihedral_augment, make_data_loaders
+from data_loader import (
+    GalaxyLMDBDataSource,
+    augment_features,
+    close_envs,
+    dihedral_augment,
+    make_data_loaders,
+    make_data_splits,
+    split_hash,
+    stratified_split,
+)
 
 SIZE = 8
 CENTRE = SIZE // 2
@@ -61,7 +73,8 @@ def make_lmdb(tmp_path):
         env.close()
         return str(path)
 
-    return build
+    yield build
+    close_envs()
 
 
 def sample_id(image):
@@ -301,3 +314,77 @@ class TestResumePosition:
 
         assert len(resumed) == 4
         assert all(np.array_equal(a, b) for a, b in zip(straight[offset:], resumed))
+
+
+class TestDataSplits:
+    def test_split_is_stratified_and_partitions_the_indices(self):
+        labels = np.arange(100) % NUM_CLASSES
+        train, val = stratified_split(labels, val_fraction=0.2, seed=0)
+        assert set(train).isdisjoint(val)
+        assert sorted(np.concatenate([train, val])) == list(range(100))
+        assert np.bincount(labels[val], minlength=NUM_CLASSES).tolist() == [2] * NUM_CLASSES
+
+    def test_val_batches_are_identical_and_unaugmented(self, make_lmdb):
+        splits = make_data_splits(make_lmdb(100), batch_size=4, val_fraction=0.2)
+        first = [np.asarray(x) for x, _ in splits.val]
+        second = [np.asarray(x) for x, _ in splits.val]
+        assert all(np.array_equal(a, b) for a, b in zip(first, second, strict=True))
+        assert {marker_corner(img) for img in np.concatenate(first)} == {(0, 0)}
+
+    def test_train_never_sees_val_samples(self, make_lmdb):
+        splits = make_data_splits(make_lmdb(100), batch_size=4, val_fraction=0.2)
+        val_ids = {sample_id(img) for x, _ in splits.val for img in np.asarray(x)}
+        for epoch in range(3):
+            images, _ = run_epoch(splits.train, epoch)
+            assert val_ids.isdisjoint(sample_id(img) for img in images)
+
+    def test_hash_tracks_the_split(self, make_lmdb):
+        db = make_lmdb(100)
+        a = make_data_splits(db, batch_size=4, val_fraction=0.2, split_seed=0)
+        b = make_data_splits(db, batch_size=4, val_fraction=0.2, split_seed=0)
+        c = make_data_splits(db, batch_size=4, val_fraction=0.2, split_seed=1)
+        assert a.val_hash == b.val_hash != c.val_hash
+
+    def test_split_is_pinned_across_library_versions(self):
+        """Fails if a numpy upgrade changes the permutation stream."""
+        _, val = stratified_split(np.arange(100) % NUM_CLASSES, 0.2, seed=0)
+        assert split_hash(val) == "4d5ff5033266"
+
+    @pytest.mark.parametrize("val_fraction", [0.1, 0.9])
+    def test_a_class_missing_from_either_side_raises(self, val_fraction):
+        labels = np.array([0] * 20 + [1] * 2)
+        with pytest.raises(ValueError, match="Class 1"):
+            stratified_split(labels, val_fraction=val_fraction, seed=0)
+
+    @pytest.mark.parametrize("n, expected", [(5, 1), (15, 2), (25, 3)])
+    def test_half_counts_round_up(self, n, expected):
+        _, val = stratified_split(np.zeros(n, dtype=int), val_fraction=0.1, seed=0)
+        assert len(val) == expected
+
+
+class TestSharedEnv:
+    def test_a_pickled_source_reads_in_a_spawned_process(self, make_lmdb):
+        source = GalaxyLMDBDataSource(make_lmdb(24), np.arange(24))
+        source[0]
+        restored = pickle.loads(pickle.dumps(source))
+        assert int(restored[3]["label"]) == 3
+
+        ctx = multiprocessing.get_context("spawn")
+        with ProcessPoolExecutor(max_workers=1, mp_context=ctx) as pool:
+            sample = pool.submit(operator.getitem, source, 3).result()
+        assert int(sample["label"]) == 3
+
+    def test_a_forked_process_refuses_the_inherited_handle(self, make_lmdb):
+        source = GalaxyLMDBDataSource(make_lmdb(24), np.arange(24))
+        source[0]
+
+        ctx = multiprocessing.get_context("fork")
+        with ProcessPoolExecutor(max_workers=1, mp_context=ctx) as pool:
+            with pytest.raises(RuntimeError, match="spawn"):
+                pool.submit(operator.getitem, source, 3).result()
+
+    def test_closed_handles_are_reopened(self, make_lmdb):
+        source = GalaxyLMDBDataSource(make_lmdb(24), np.arange(24))
+        source[0]
+        close_envs()
+        assert int(source[3]["label"]) == 3

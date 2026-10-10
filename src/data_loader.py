@@ -1,3 +1,5 @@
+import hashlib
+import os
 import pickle
 import threading
 from dataclasses import dataclass
@@ -10,54 +12,64 @@ import numpy as np
 from PIL import Image
 
 
+_ENVS: Dict[str, Tuple[int, lmdb.Environment]] = {}
+_ENVS_LOCK = threading.Lock()
+
+
+def open_env(db_path: str) -> lmdb.Environment:
+    """One shared read-only handle per path, owned by the process that opened it.
+
+    LMDB refuses to open the same environment twice in one process, so the
+    train and validation sources must share it. Worker processes must be
+    spawned, not forked: a forked child inherits LMDB's record of the open
+    environment and can neither reopen it nor safely use the parent's handle.
+    """
+    key = os.path.realpath(db_path)
+    with _ENVS_LOCK:
+        if key not in _ENVS:
+            env = lmdb.open(
+                db_path,
+                readonly=True,
+                lock=False,
+                readahead=False,
+                meminit=False,
+            )
+            _ENVS[key] = (os.getpid(), env)
+        owner, env = _ENVS[key]
+    if owner != os.getpid():
+        raise RuntimeError(
+            f"LMDB handle for {key} was opened in process {owner} and inherited "
+            "by fork. Start data-loading workers with the 'spawn' method."
+        )
+    return env
+
+
+def close_envs() -> None:
+    with _ENVS_LOCK:
+        for owner, env in _ENVS.values():
+            if owner == os.getpid():
+                env.close()
+        _ENVS.clear()
+
+
 @dataclass
 class GalaxyLMDBDataSource(grain.RandomAccessDataSource):
     db_path: str
     indices: np.ndarray
 
     def __post_init__(self):
-        env = lmdb.open(self.db_path, readonly=True, lock=False)
-        with env.begin() as txn:
+        with open_env(self.db_path).begin() as txn:
             meta_bytes = txn.get(b"__metadata__")
             if meta_bytes is None:
                 raise ValueError("LMDB does not contain '__metadata__' key!")
             self.metadata = pickle.loads(meta_bytes)
-        env.close()
-        self._env = None
-        self._env_lock = threading.Lock()
 
     def __len__(self) -> int:
         return len(self.indices)
 
-    def _get_env(self):
-        if self._env is not None:
-            return self._env
-
-        with self._env_lock:
-            if self._env is None:
-                self._env = lmdb.open(
-                    self.db_path,
-                    readonly=True,
-                    lock=False,
-                    readahead=False,
-                    meminit=False,
-                )
-        return self._env
-
-    def __getstate__(self):
-        state = self.__dict__.copy()
-        state["_env"] = None
-        state.pop("_env_lock", None)
-        return state
-
-    def __setstate__(self, state):
-        self.__dict__.update(state)
-        self._env = None
-        self._env_lock = threading.Lock()
-
     def __getitem__(self, record_key: int) -> Dict[str, Any]:
         real_idx = self.indices[record_key]
-        env = self._get_env()
+        env = open_env(self.db_path)
 
         with env.begin() as txn:
             byteflow = txn.get(f"{real_idx}".encode())
@@ -127,22 +139,65 @@ class TrainingData:
     steps_per_epoch: int
 
 
-def make_data_loaders(
-    db_path: str,
-    batch_size: int,
-    seed: int = 42,
-    image_size: Optional[Tuple[int, int]] = None,
-    augment: bool = True,
-) -> TrainingData:
-    temp_env = lmdb.open(db_path, readonly=True, lock=False)
-    with temp_env.begin() as txn:
+@dataclass(frozen=True)
+class DataSplits:
+    """A stratified train/validation split of one LMDB.
+
+    `val` is finite, unshuffled and unaugmented, so every iteration yields the
+    same batches. `val_hash` fingerprints the validation indices.
+    """
+
+    train: TrainingData
+    val: grain.MapDataset
+    val_hash: str
+
+
+def _num_samples(db_path: str) -> int:
+    with open_env(db_path).begin() as txn:
         meta = pickle.loads(txn.get(b"__metadata__"))
-        total_samples = meta["num_samples"]
-    temp_env.close()
+    return meta["num_samples"]
 
-    indices = np.arange(total_samples)
-    source = GalaxyLMDBDataSource(db_path, indices)
 
+def read_labels(db_path: str) -> np.ndarray:
+    n = _num_samples(db_path)
+    labels = np.empty(n, dtype=np.int64)
+    with open_env(db_path).begin() as txn:
+        for i in range(n):
+            labels[i] = int(pickle.loads(txn.get(f"{i}".encode()))["label"])
+    return labels
+
+
+def stratified_split(
+    labels: np.ndarray, val_fraction: float, seed: int
+) -> Tuple[np.ndarray, np.ndarray]:
+    rng = np.random.default_rng(seed)
+    train, val = [], []
+    for c in np.unique(labels):
+        idx = rng.permutation(np.flatnonzero(labels == c))
+        n_val = int(np.floor(len(idx) * val_fraction + 0.5))
+        if not 0 < n_val < len(idx):
+            raise ValueError(
+                f"Class {c} has {len(idx)} samples, which at "
+                f"val_fraction={val_fraction} leaves {n_val} for validation and "
+                f"{len(idx) - n_val} for training; both need at least one."
+            )
+        val.append(idx[:n_val])
+        train.append(idx[n_val:])
+    return np.sort(np.concatenate(train)), np.sort(np.concatenate(val))
+
+
+def split_hash(val_indices: np.ndarray) -> str:
+    data = np.sort(np.asarray(val_indices)).astype(np.int64).tobytes()
+    return hashlib.sha256(data).hexdigest()[:12]
+
+
+def _training_data(
+    source: GalaxyLMDBDataSource,
+    batch_size: int,
+    seed: int,
+    image_size: Optional[Tuple[int, int]],
+    augment: bool,
+) -> TrainingData:
     process_fn = partial(process_features, image_size=image_size)
 
     dataset = grain.MapDataset.source(source).seed(seed).shuffle().map(process_fn)
@@ -155,6 +210,50 @@ def make_data_loaders(
     return TrainingData(epoch.repeat(None), len(epoch))
 
 
+def make_data_loaders(
+    db_path: str,
+    batch_size: int,
+    seed: int = 42,
+    image_size: Optional[Tuple[int, int]] = None,
+    augment: bool = True,
+) -> TrainingData:
+    indices = np.arange(_num_samples(db_path))
+    source = GalaxyLMDBDataSource(db_path, indices)
+    return _training_data(source, batch_size, seed, image_size, augment)
+
+
+def make_data_splits(
+    db_path: str,
+    batch_size: int,
+    val_fraction: float = 0.1,
+    split_seed: int = 0,
+    seed: int = 42,
+    image_size: Optional[Tuple[int, int]] = None,
+    augment: bool = True,
+) -> DataSplits:
+    train_idx, val_idx = stratified_split(
+        read_labels(db_path), val_fraction, split_seed
+    )
+
+    train = _training_data(
+        GalaxyLMDBDataSource(db_path, train_idx), batch_size, seed, image_size, augment
+    )
+
+    process_fn = partial(process_features, image_size=image_size)
+    val = (
+        grain.MapDataset.source(GalaxyLMDBDataSource(db_path, val_idx))
+        .map(process_fn)
+        .batch(batch_size=batch_size, drop_remainder=True)
+    )
+    if len(val) == 0:
+        raise ValueError(
+            f"Validation split has {len(val_idx)} samples, fewer than one batch "
+            f"of {batch_size}."
+        )
+
+    return DataSplits(train, val, split_hash(val_idx))
+
+
 def make_overfit_loader(
     db_path: str,
     batch_size: int,
@@ -162,7 +261,7 @@ def make_overfit_loader(
     num_samples: int = 5,
     image_size: Optional[Tuple[int, int]] = None,
 ) -> grain.MapDataset:
-    temp_env = lmdb.open(db_path, readonly=True, lock=False)
+    temp_env = open_env(db_path)
     found_indices = []
 
     print(f"Searching for {num_samples} samples of class {target_class}...")
@@ -179,7 +278,6 @@ def make_overfit_loader(
 
             if len(found_indices) == num_samples:
                 break
-    temp_env.close()
 
     if len(found_indices) < num_samples:
         raise ValueError(
