@@ -239,9 +239,10 @@ def make_data_splits(
         GalaxyLMDBDataSource(db_path, train_idx), batch_size, seed, image_size, augment
     )
 
+    val_order = np.random.default_rng(split_seed).permutation(val_idx)
     process_fn = partial(process_features, image_size=image_size)
     val = (
-        grain.MapDataset.source(GalaxyLMDBDataSource(db_path, val_idx))
+        grain.MapDataset.source(GalaxyLMDBDataSource(db_path, val_order))
         .map(process_fn)
         .batch(batch_size=batch_size, drop_remainder=True)
     )
