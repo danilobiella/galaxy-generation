@@ -1,4 +1,6 @@
 import pickle
+import shutil
+import sys
 
 import haiku as hk
 import jax
@@ -7,6 +9,7 @@ import numpy as np
 import optax  # type: ignore
 
 from src.config import (BATCH_SIZE, CHECKPOINT_EVERY, CKPT_DIR, DATA_PATH,
+                        KAGGLE_STAGED_DATA_PATH,
                         DATA_SEED, DDIM_STEPS, EMA_DECAY, EVAL_TIMESTEPS,
                         FIGURES_DIR, FINAL_LEARNING_RATE, GRADIENT_PLOT_PATH,
                         GUIDANCE_SCALE, HISTORY_PATH, IMAGE_SIZE,
@@ -23,12 +26,19 @@ from src.diffusion import DiffusionSchedule, make_samplers
 from src.train import fit_model, make_eval_fn, make_model_fns, make_train_fns
 from src.weights import save_params
 
+sys.stdout.reconfigure(line_buffering=True)
 print("Running on Kaggle" if ON_KAGGLE else "Running locally")
 
 # %% -- data ---------------------------------------------------------------
 
+db_path = DATA_PATH
+if ON_KAGGLE:
+    print(f"Copying {DATA_PATH} to local disk at {KAGGLE_STAGED_DATA_PATH}...")
+    shutil.copytree(DATA_PATH, KAGGLE_STAGED_DATA_PATH, dirs_exist_ok=True)
+    db_path = KAGGLE_STAGED_DATA_PATH
+
 splits = make_data_splits(
-    db_path=DATA_PATH,
+    db_path=db_path,
     batch_size=BATCH_SIZE,
     val_fraction=VAL_FRACTION,
     split_seed=SPLIT_SEED,

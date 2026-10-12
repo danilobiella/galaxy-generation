@@ -8,6 +8,7 @@ SMOKE = os.environ.get("SMOKE") == "1"
 
 KAGGLE_DATA_PATH = "/kaggle/input/galaxy10-DECaLS"
 LOCAL_DATA_PATH = "data/galaxy10_decals_lmdb"
+KAGGLE_STAGED_DATA_PATH = "/tmp/galaxy10_decals_lmdb"
 
 DATA_PATH = KAGGLE_DATA_PATH if ON_KAGGLE else LOCAL_DATA_PATH
 
