@@ -15,10 +15,10 @@ import jax.numpy as jnp
 import numpy as np
 from scipy import linalg
 
-import fidjax
-from config import (INCEPTION_WEIGHTS_PATH, INCEPTION_WEIGHTS_SHA256,
-                    INCEPTION_WEIGHTS_URL)
-from data_loader import GalaxyLMDBDataSource, resize_image
+from src import fidjax
+from src.config import (INCEPTION_WEIGHTS_PATH, INCEPTION_WEIGHTS_SHA256,
+                        INCEPTION_WEIGHTS_URL)
+from src.data_loader import GalaxyLMDBDataSource, resize_image
 
 FEATURE_DIM = 2048
 

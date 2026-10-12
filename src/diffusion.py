@@ -1,8 +1,4 @@
-"""Noise schedule and reverse-process samplers, shared by training and inference.
-
-Deliberately free of project-local imports so it stays importable both as
-`src.diffusion` (Kaggle layout) and as `diffusion` (editable install).
-"""
+"""Noise schedule and reverse-process samplers, shared by training and inference."""
 
 from functools import partial
 from typing import Callable, NamedTuple

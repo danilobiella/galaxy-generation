@@ -7,7 +7,7 @@ import lmdb
 import numpy as np
 from tqdm import tqdm
 
-from config import LOCAL_DATA_PATH
+from src.config import LOCAL_DATA_PATH
 
 H5_PATH = "data/Galaxy10_DECals.h5"
 METADATA_KEY = b"__metadata__"

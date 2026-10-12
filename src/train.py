@@ -12,7 +12,7 @@ import numpy as np
 import optax  # type: ignore
 
 if TYPE_CHECKING:
-    from diffusion import DiffusionSchedule, Samplers
+    from src.diffusion import DiffusionSchedule, Samplers
 
 
 class ModelState(NamedTuple):

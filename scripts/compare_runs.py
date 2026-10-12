@@ -18,7 +18,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from config import N_EPOCHS, RUNS_DIR
+from src.config import N_EPOCHS, RUNS_DIR
 
 DEFAULT_RUNS = (RUNS_DIR / "old", RUNS_DIR / "new")
 METRICS = ("loss", "grad_norm", "param_norm")

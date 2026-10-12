@@ -15,7 +15,7 @@ import json
 import math
 from pathlib import Path
 
-from config import CLASS_NAMES, STUDY_DIR
+from src.config import CLASS_NAMES, STUDY_DIR
 
 COMPARISONS = {
     "ab": ("A", "B", "A vs B"),

@@ -13,12 +13,12 @@ from pathlib import Path
 
 import numpy as np
 
-from config import (DATA_PATH, DDIM_STEPS, GUIDANCE_SCALE, IMAGE_SIZE,
-                    SPLIT_SEED, TIMESTEPS, VAL_FRACTION, WEIGHTS_PATH)
-from data_loader import read_labels, stratified_split
-from generate import Generator
-from metrics import (fid_score, inception_features, kid_score, load_images,
-                     load_inception)
+from src.config import (DATA_PATH, DDIM_STEPS, GUIDANCE_SCALE, IMAGE_SIZE,
+                        SPLIT_SEED, TIMESTEPS, VAL_FRACTION, WEIGHTS_PATH)
+from src.data_loader import read_labels, stratified_split
+from src.generate import Generator
+from src.metrics import (fid_score, inception_features, kid_score, load_images,
+                         load_inception)
 
 
 def main() -> None:

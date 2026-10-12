@@ -7,7 +7,7 @@ from pathlib import Path
 import jax
 import numpy as np
 
-from config import (
+from src.config import (
     DDIM_ETA,
     DDIM_STEPS,
     GUIDANCE_SCALE,
@@ -17,15 +17,15 @@ from config import (
     TIMESTEPS,
     WEIGHTS_PATH,
 )
-from diffusion import (
+from src.diffusion import (
     SAMPLERS,
     DiffusionSchedule,
     check_sampler,
     ddim_timesteps,
     make_samplers,
 )
-from models import build_network, is_conditional
-from weights import load_params
+from src.models import build_network, is_conditional
+from src.weights import load_params
 
 __all__ = ["SAMPLERS", "Generator", "load_generator", "random_seed", "to_uint8"]
 

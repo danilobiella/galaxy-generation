@@ -10,7 +10,7 @@ from conftest import (
     label_encoding_unet,
 )
 
-from diffusion import (
+from src.diffusion import (
     SAMPLERS,
     DiffusionSchedule,
     check_sampler,

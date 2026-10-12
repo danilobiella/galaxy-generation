@@ -11,7 +11,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from config import (
+from src.config import (
     CLASS_NAMES,
     DDIM_ETA,
     DDIM_STEPS,
@@ -22,7 +22,7 @@ from config import (
     TIMESTEPS,
     WEIGHTS_PATH,
 )
-from generate import SAMPLERS, Generator, random_seed
+from src.generate import SAMPLERS, Generator, random_seed
 
 DEFAULT_OUT_DIR = RUNS_DIR / "generated"
 

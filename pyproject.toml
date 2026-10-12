@@ -10,8 +10,7 @@ build-backend = "hatchling.build"
 requires = ["hatchling"]
 
 [tool.hatch.build.targets.wheel]
-only-include = ["src"]
-sources = ["src"]
+packages = ["src"]
 
 [tool.pixi.workspace]
 channels = ["conda-forge"]

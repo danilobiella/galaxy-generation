@@ -4,8 +4,8 @@ import numpy as np
 import optax
 import pytest
 
-from checkpoint import check_resumable, manager, restore, run_meta, save, saver
-from train import ModelState, fit_model, make_train_fns
+from src.checkpoint import check_resumable, manager, restore, run_meta, save, saver
+from src.train import ModelState, fit_model, make_train_fns
 
 META = run_meta(
     steps_per_epoch=2,

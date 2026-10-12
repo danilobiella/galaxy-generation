@@ -5,7 +5,7 @@ USER user
 
 ENV HOME=/home/user \
     PATH=/home/user/.local/bin:$PATH \
-    PYTHONPATH=/app/src \
+    PYTHONPATH=/app \
     PYTHONUNBUFFERED=1 \
     JAX_PLATFORMS=cpu \
     PORT=7860
@@ -20,4 +20,4 @@ COPY --chown=user model_checkpoints/galaxy_unet.safetensors /app/model_checkpoin
 
 EXPOSE 7860
 
-CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "7860"]
+CMD ["uvicorn", "src.api:app", "--host", "0.0.0.0", "--port", "7860"]

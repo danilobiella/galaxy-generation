@@ -20,7 +20,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from config import (
+from src.config import (
     CLASS_NAMES,
     DATA_PATH,
     DDIM_STEPS,
@@ -31,8 +31,8 @@ from config import (
     STUDY_DIR,
     TIMESTEPS,
 )
-from generate import Generator
-from memorization import load_dataset, load_labels
+from src.generate import Generator
+from src.memorization import load_dataset, load_labels
 
 TEMPLATE = Path(__file__).resolve().parent.parent / "src" / "static" / "study.html"
 

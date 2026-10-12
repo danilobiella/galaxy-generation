@@ -72,12 +72,12 @@ smoke:
 # Serve the model
 api:
 	@echo "$(GREEN)Starting API on $(API_HOST):$(API_PORT)...$(RESET)"
-	uvicorn api:app --host $(API_HOST) --port $(API_PORT)
+	uvicorn src.api:app --host $(API_HOST) --port $(API_PORT)
 
 # Same, forced onto CPU (what the deployed container will look like)
 api-cpu:
 	@echo "$(GREEN)Starting API on CPU at $(API_HOST):$(API_PORT)...$(RESET)"
-	JAX_PLATFORMS=cpu uvicorn api:app --host $(API_HOST) --port $(API_PORT)
+	JAX_PLATFORMS=cpu uvicorn src.api:app --host $(API_HOST) --port $(API_PORT)
 
 # Build the inference image exactly as Hugging Face will
 docker-build:

@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from config import (
+from src.config import (
     API_MAX_BATCH,
     API_STEPS,
     CLASS_NAMES,
@@ -30,8 +30,8 @@ from config import (
     NUM_CLASSES,
     WEIGHTS_PATH,
 )
-from generate import load_generator, random_seed
-from logs import setup_logging
+from src.generate import load_generator, random_seed
+from src.logs import setup_logging
 
 SAMPLER = "ddim"
 MAX_GUIDANCE = 8.0

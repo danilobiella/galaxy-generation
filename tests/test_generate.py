@@ -3,9 +3,9 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-import generate as generate_module
-from generate import Generator, load_generator, random_seed, to_uint8
-from weights import save_params
+import src.generate as generate_module
+from src.generate import Generator, load_generator, random_seed, to_uint8
+from src.weights import save_params
 
 IMAGE_SIZE = (8, 8)
 TIMESTEPS = 20

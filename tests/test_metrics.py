@@ -6,10 +6,10 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from config import INCEPTION_WEIGHTS_PATH
-from data_loader import close_envs, process_features
-from metrics import (fid_score, inception_features, kid_score, load_images,
-                     load_inception)
+from src.config import INCEPTION_WEIGHTS_PATH
+from src.data_loader import close_envs, process_features
+from src.metrics import (fid_score, inception_features, kid_score, load_images,
+                         load_inception)
 
 DATA = Path(__file__).parent / "data"
 

@@ -6,7 +6,7 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from diffusion import DiffusionSchedule
+from src.diffusion import DiffusionSchedule
 
 T = 20
 IMAGE_SHAPE = (8, 8, 3)

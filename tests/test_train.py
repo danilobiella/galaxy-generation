@@ -6,8 +6,8 @@ import numpy as np
 import optax
 import pytest
 
-from diffusion import ddim_timesteps, make_samplers
-from train import (
+from src.diffusion import ddim_timesteps, make_samplers
+from src.train import (
     ModelState,
     TrainState,
     fit_model,

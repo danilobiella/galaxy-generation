@@ -8,7 +8,7 @@ import lmdb
 import numpy as np
 import pytest
 
-from data_loader import (
+from src.data_loader import (
     GalaxyLMDBDataSource,
     augment_features,
     close_envs,
