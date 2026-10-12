@@ -71,6 +71,13 @@ class GalaxyLMDBDataSource(grain.RandomAccessDataSource):
         return {"image": sample["img"], "label": sample["label"]}
 
 
+def resize_image(img: np.ndarray, image_size: Tuple[int, int]) -> np.ndarray:
+    target_h, target_w = image_size
+    img_pil = Image.fromarray(img)
+    img_pil = img_pil.resize((target_w, target_h), Image.Resampling.BILINEAR)
+    return np.array(img_pil)
+
+
 def process_features(
     features: Dict[str, Any], image_size: Optional[Tuple[int, int]] = None
 ) -> Tuple[np.ndarray, np.ndarray]:
@@ -78,10 +85,7 @@ def process_features(
     img = features["image"]
 
     if image_size is not None:
-        target_h, target_w = image_size
-        img_pil = Image.fromarray(img)
-        img_pil = img_pil.resize((target_w, target_h), Image.Resampling.BILINEAR)
-        img = np.array(img_pil)
+        img = resize_image(img, image_size)
 
     img = img.astype(np.float32) / 255.0
     features["image"] = (img * 2.0) - 1.0

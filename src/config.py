@@ -27,6 +27,13 @@ TRAIN_WEIGHTS_PATH = RUNS_DIR / "galaxy_unet.safetensors"
 CKPT_DIR = RUNS_DIR / "ckpt"
 
 WEIGHTS_PATH = CHECKPOINTS_DIR / "galaxy_unet.safetensors"
+INCEPTION_WEIGHTS_PATH = CHECKPOINTS_DIR / "inception_v3_weights_fid.pickle"
+INCEPTION_WEIGHTS_URL = (
+    "https://www.dropbox.com/s/xt6zvlvt22dcwck/inception_v3_weights_fid.pickle?dl=1"
+)
+INCEPTION_WEIGHTS_SHA256 = (
+    "4e030efa5bccac3222d975f658d1884f9e00fab24f2812082884539220b90d77"
+)
 
 IMAGE_SIZE = (64, 64)
 TIMESTEPS = 1000

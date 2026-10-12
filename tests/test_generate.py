@@ -56,9 +56,8 @@ def cond(stub_net):
 
 class TestToUint8:
     def test_maps_the_model_range_onto_the_byte_range(self):
-        """The cast truncates, so mid-grey lands on 127 rather than 128."""
         out = to_uint8(jnp.array([-1.0, 0.0, 1.0]))
-        np.testing.assert_array_equal(out, [0, 127, 255])
+        np.testing.assert_array_equal(out, [0, 128, 255])
 
     def test_clips_out_of_range_values(self):
         out = to_uint8(jnp.array([-5.0, 5.0]))

@@ -32,7 +32,7 @@ __all__ = ["SAMPLERS", "Generator", "load_generator", "random_seed", "to_uint8"]
 
 def to_uint8(images) -> np.ndarray:
     array = np.asarray(jax.device_get(images))
-    return np.clip((array + 1.0) / 2.0 * 255.0, 0, 255).astype(np.uint8)
+    return np.rint(np.clip((array + 1.0) / 2.0 * 255.0, 0, 255)).astype(np.uint8)
 
 
 def random_seed() -> int:
