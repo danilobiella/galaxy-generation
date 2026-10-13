@@ -22,6 +22,7 @@ from src.config import (INCEPTION_WEIGHTS_PATH, INCEPTION_WEIGHTS_SHA256,
                         INCEPTION_WEIGHTS_URL)
 from src.data_loader import GalaxyLMDBDataSource, resize_image
 from src.generate import sample_batched
+from src.train import format_duration
 
 
 def load_inception() -> fidjax.FID:
@@ -173,9 +174,10 @@ def make_sample_quality_fn(
         featurized = time.perf_counter()
         scores = quality_scores(feats, ref)
         print(
-            f"[EPOCH {epoch}] {format_scores(scores)} | sampling {sampled - start:.0f}s, "
-            f"inception {featurized - sampled:.0f}s, "
-            f"scores {time.perf_counter() - featurized:.0f}s"
+            f"[EPOCH {epoch}] {format_scores(scores)} | "
+            f"sampling {format_duration(sampled - start)}, "
+            f"inception {format_duration(featurized - sampled)}, "
+            f"scores {format_duration(time.perf_counter() - featurized)}"
         )
         return scores
 

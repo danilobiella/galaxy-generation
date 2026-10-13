@@ -30,7 +30,8 @@ from src.plot import (epochs_table, plot_gradients, plot_loss,
 from src.diffusion import DiffusionSchedule, make_samplers
 from src.generate import to_uint8
 from src.metrics import load_inception, make_sample_quality_fn
-from src.train import fit_model, make_eval_fn, make_model_fns, make_train_fns
+from src.train import (fit_model, format_duration, make_eval_fn,
+                       make_model_fns, make_train_fns)
 from src.weights import save_params
 
 sys.stdout.reconfigure(line_buffering=True)
@@ -208,14 +209,14 @@ quality_fn = make_sample_quality_fn(
 )
 print(
     f"FID/KID set up on {len(val_images)} validation images in "
-    f"{time.perf_counter() - phase_start:.1f}s"
+    f"{format_duration(time.perf_counter() - phase_start)}"
 )
 
 
 def eval_fn(epoch, train_state):
     mse_start = time.perf_counter()
     metrics = mse_fn(epoch, train_state)
-    print(f"[EPOCH {epoch}] val MSE eval took {time.perf_counter() - mse_start:.0f}s")
+    print(f"[EPOCH {epoch}] val MSE eval took {format_duration(time.perf_counter() - mse_start)}")
     if epoch % FID_EVERY == 0 or epoch == N_EPOCHS:
         metrics |= quality_fn(epoch, train_state)
     return metrics

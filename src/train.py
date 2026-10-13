@@ -274,8 +274,18 @@ def train_epoch(
             )
             last_idx = len(epoch_metrics["loss"])
 
-    print(f"[Ep {epoch}/{n_epochs}] waited {data_wait:.1f}s for data")
+    print(f"[Ep {epoch}/{n_epochs}] waited {format_duration(data_wait)} for data")
     return train_state, epoch_metrics
+
+
+def format_duration(seconds: float) -> str:
+    if seconds < 60:
+        return f"{seconds:.1f} s"
+    if seconds < 3600:
+        return f"{seconds / 60:.1f} min"
+    if seconds < 86400:
+        return f"{seconds / 3600:.1f} h"
+    return f"{seconds / 86400:.1f} d"
 
 
 def peak_memory() -> str:
@@ -365,7 +375,7 @@ def fit_model(
             if "val_mse" in val_metrics:
                 val_msg = (
                     f" | Val MSE: {val_metrics['val_mse']:.4f} "
-                    f"({time.time() - eval_start:.1f}s)"
+                    f"({format_duration(time.time() - eval_start)})"
                 )
         history.setdefault("epochs", []).append(record)
 
@@ -380,8 +390,8 @@ def fit_model(
         elapsed = time.time() - run_start
         eta = elapsed / (epoch - start_epoch + 1) * (n_epochs - epoch)
         print(
-            f"[EPOCH {epoch}] wall {(time.time() - start_time) / 60:.1f} min | "
-            f"elapsed {elapsed / 3600:.2f} h | ETA {eta / 3600:.2f} h | "
+            f"[EPOCH {epoch}] wall {format_duration(time.time() - start_time)} | "
+            f"elapsed {format_duration(elapsed)} | ETA {format_duration(eta)} | "
             f"peak GPU memory {peak_memory()}"
         )
         print("-" * 80)
