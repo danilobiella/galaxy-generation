@@ -213,7 +213,9 @@ print(
 
 
 def eval_fn(epoch, train_state):
+    mse_start = time.perf_counter()
     metrics = mse_fn(epoch, train_state)
+    print(f"[EPOCH {epoch}] val MSE eval took {time.perf_counter() - mse_start:.0f}s")
     if epoch % FID_EVERY == 0 or epoch == N_EPOCHS:
         metrics |= quality_fn(epoch, train_state)
     return metrics

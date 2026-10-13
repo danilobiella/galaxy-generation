@@ -238,7 +238,9 @@ def train_epoch(
     }
 
     last_idx = 0
+    data_wait = 0.0
     for i in range(steps):
+        wait_start = time.perf_counter()
         try:
             batch = next(batches)
         except StopIteration:
@@ -246,6 +248,7 @@ def train_epoch(
                 f"Batch stream ended after {i} of {steps} steps in epoch {epoch}. "
                 "steps_per_epoch does not match the data being passed in."
             ) from None
+        data_wait += time.perf_counter() - wait_start
         # Extract images from tuple if your dataloader returns (images, labels)
         if isinstance(batch, tuple):
             real_imgs, labels = batch[0], batch[1]
@@ -271,7 +274,19 @@ def train_epoch(
             )
             last_idx = len(epoch_metrics["loss"])
 
+    print(f"[Ep {epoch}/{n_epochs}] waited {data_wait:.1f}s for data")
     return train_state, epoch_metrics
+
+
+def peak_memory() -> str:
+    parts = []
+    for d in jax.local_devices():
+        stats = d.memory_stats() or {}
+        if "peak_bytes_in_use" in stats:
+            used = stats["peak_bytes_in_use"] / 2**30
+            limit = stats.get("bytes_limit", 0) / 2**30
+            parts.append(f"{d.id}: {used:.1f}/{limit:.1f} GB")
+    return ", ".join(parts) or "n/a"
 
 
 def fit_model(
@@ -311,6 +326,7 @@ def fit_model(
     print(f"\nStarting Training | Epochs: {n_epochs} | Batches: {steps_per_epoch}")
     print("-" * 80)
 
+    run_start = time.time()
     for epoch in range(start_epoch, n_epochs + 1):
         start_time = time.time()
 
@@ -357,9 +373,17 @@ def fit_model(
             f"[EPOCH {epoch}] COMPLETED | Time: {epoch_time:.1f}s | "
             f"AVG Loss: {avg_loss:.4f}{val_msg}"
         )
-        print("-" * 80)
 
         if checkpoint_fn is not None:
             checkpoint_fn(epoch, train_state, history, epoch == n_epochs)
+
+        elapsed = time.time() - run_start
+        eta = elapsed / (epoch - start_epoch + 1) * (n_epochs - epoch)
+        print(
+            f"[EPOCH {epoch}] wall {(time.time() - start_time) / 60:.1f} min | "
+            f"elapsed {elapsed / 3600:.2f} h | ETA {eta / 3600:.2f} h | "
+            f"peak GPU memory {peak_memory()}"
+        )
+        print("-" * 80)
 
     return train_state, history
