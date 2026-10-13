@@ -16,7 +16,7 @@ import orbax.checkpoint as ocp  # type: ignore
 
 class Resumed(NamedTuple):
     train_state: Any
-    history: dict[str, list[float]]
+    history: dict
     meta: dict[str, Any]
 
 
@@ -72,7 +72,7 @@ def save(
     mgr: ocp.CheckpointManager,
     epoch: int,
     train_state: Any,
-    history: dict[str, list[float]],
+    history: dict,
     meta: dict[str, Any],
     force: bool = False,
 ) -> bool:

@@ -7,6 +7,7 @@ import optax
 import pytest
 
 from src.diffusion import ddim_timesteps, make_samplers
+from src.plot import epochs_table
 from src.train import (
     ModelState,
     TrainState,
@@ -387,13 +388,16 @@ class TestFitModel:
         assert seen[0] == pytest.approx(float(final.ema_params["w"]))
         assert seen[0] != pytest.approx(float(final.model_state.params["w"]))
 
-    def test_evaluates_once_per_epoch_into_history(self, net, sched, batch, tmp_path):
+    def test_evaluates_once_per_epoch_into_the_epochs_table(
+        self, net, sched, batch, tmp_path
+    ):
         state, step_fn = make_trainer(net, sched)
         epochs_seen = []
 
         def eval_fn(epoch, train_state):
             epochs_seen.append(epoch)
-            return {"val_mse": float(epoch)}
+            sparse = {"kid": 0.5} if epoch == 2 else {}
+            return {"val_mse": float(epoch), **sparse}
 
         _, history = fit_model(
             jax.random.key(0),
@@ -408,8 +412,13 @@ class TestFitModel:
             eval_fn=eval_fn,
         )
         assert epochs_seen == [1, 2, 3]
-        assert history["val_mse"] == [1.0, 2.0, 3.0]
-        assert len(history["loss"]) == 6
+        table = epochs_table(history)
+        assert list(table.index) == [1, 2, 3]
+        assert list(table["val_mse"]) == [1.0, 2.0, 3.0]
+        assert table["kid"].isna().tolist() == [True, False, True]
+        assert table["train_loss"].tolist() == pytest.approx(
+            np.asarray(history["loss"]).reshape(3, 2).mean(axis=1)
+        )
 
 
 class TestEvalFn:

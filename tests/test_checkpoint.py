@@ -239,7 +239,7 @@ class TestResumeEquivalence:
             history={},
             figures_dir=str(tmp_path / "figures"),
         )
-        assert set(history) == {"loss", "grad_norm", "param_norm"}
+        assert set(history) == {"loss", "grad_norm", "param_norm", "epochs"}
         assert len(history["loss"]) == 2
 
 

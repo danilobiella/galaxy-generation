@@ -286,7 +286,7 @@ def fit_model(
     print_every: int = 100,
     figures_dir: str = "runs/figures",
     *,
-    history: dict[str, list[float]] | None = None,
+    history: dict | None = None,
     checkpoint_fn=None,
     eval_fn=None,
 ):
@@ -338,19 +338,21 @@ def fit_model(
             filepath=f"{figures_dir}/epoch_{epoch}.png",
         )
 
+        avg_loss = float(np.mean(epoch_data["loss"]))
+        record = {"epoch": epoch, "train_loss": avg_loss}
+
         val_msg = ""
         if eval_fn is not None:
             eval_start = time.time()
             val_metrics = eval_fn(epoch, train_state)
-            for key_name, value in val_metrics.items():
-                history.setdefault(key_name, []).append(value)
+            record.update(val_metrics)
             if "val_mse" in val_metrics:
                 val_msg = (
                     f" | Val MSE: {val_metrics['val_mse']:.4f} "
                     f"({time.time() - eval_start:.1f}s)"
                 )
+        history.setdefault("epochs", []).append(record)
 
-        avg_loss = np.mean(epoch_data["loss"])
         print(
             f"[EPOCH {epoch}] COMPLETED | Time: {epoch_time:.1f}s | "
             f"AVG Loss: {avg_loss:.4f}{val_msg}"

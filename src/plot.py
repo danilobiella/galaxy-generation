@@ -41,22 +41,24 @@ def plot_gradients(
     fig.savefig(filepath, dpi=300)
 
 
+def epochs_table(history: dict) -> pd.DataFrame:
+    return pd.DataFrame(history["epochs"]).set_index("epoch")
+
+
 def plot_loss(history: dict, filepath: str = "loss_plot.png"):
+    table = epochs_table(history)
     prefix = "val_mse_t"
     keys = sorted(
-        (k for k in history if k.startswith(prefix)), key=lambda k: int(k[len(prefix):])
+        (k for k in table if k.startswith(prefix)), key=lambda k: int(k[len(prefix):])
     )
-    val_mse = history["val_mse"]
-    epochs = np.arange(1, len(val_mse) + 1)
-    train_mse = np.asarray(history["loss"]).reshape(len(val_mse), -1).mean(axis=1)
     colors = TIMESTEP_RAMP(np.linspace(0.0, 1.0, len(keys)))
 
     fig, ax = plt.subplots(figsize=(9, 4.5))
-    ax.plot(epochs, train_mse, linewidth=2, color="#eb6834", label="train (epoch mean)")
-    ax.plot(epochs, val_mse, linewidth=2, color="#2b2b2b", label="val (mean)")
+    ax.plot(table["train_loss"], linewidth=2, color="#eb6834", label="train (epoch mean)")
+    ax.plot(table["val_mse"], linewidth=2, color="#2b2b2b", label="val (mean)")
     for key, color in zip(keys, colors):
         ax.plot(
-            epochs, history[key], linestyle="--", linewidth=1,
+            table[key], linestyle="--", linewidth=1,
             color=color, label=f"val t = {key[len(prefix):]}",
         )
 
@@ -71,9 +73,10 @@ def plot_loss(history: dict, filepath: str = "loss_plot.png"):
 
 
 def plot_sample_quality(history: dict, filepath: str = "sample_quality_plot.png"):
-    epochs = np.arange(1, len(history["kid"]) + 1)
-    kid = np.asarray(history["kid"]) * 1e3
-    kid_std = np.asarray(history["kid_std"]) * 1e3
+    table = epochs_table(history).dropna(subset=["kid"])
+    epochs = table.index
+    kid = table["kid"] * 1e3
+    kid_std = table["kid_std"] * 1e3
 
     fig, (ax_kid, ax_fid) = plt.subplots(2, 1, figsize=(9, 6), sharex=True)
 
@@ -81,7 +84,7 @@ def plot_sample_quality(history: dict, filepath: str = "sample_quality_plot.png"
     ax_kid.plot(epochs, kid, linewidth=2, color="#2a78d6")
     ax_kid.set_ylabel("KID (×10⁻³)")
 
-    ax_fid.plot(epochs, history["fid"], linewidth=2, color="#2b2b2b")
+    ax_fid.plot(epochs, table["fid"], linewidth=2, color="#2b2b2b")
     ax_fid.set_ylabel("FID")
     ax_fid.set_xlabel("epoch")
     ax_fid.xaxis.set_major_locator(MaxNLocator(integer=True))

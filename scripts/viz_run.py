@@ -26,7 +26,7 @@ from src.config import RUNS_DIR  # noqa: E402
 from src.plot import WINDOW, plot_gradients, plot_loss  # noqa: E402
 
 DEFAULT_RUN_DIR = RUNS_DIR
-DIFFUSION_KEYS = {"loss", "grad_norm", "param_norm"}
+DIFFUSION_KEYS = {"loss", "grad_norm", "param_norm", "epochs"}
 EPOCH_LINE = re.compile(
     r"\[EPOCH (\d+)\] COMPLETED \| Time: ([\d.]+)s \| AVG Loss: ([\d.]+)"
 )

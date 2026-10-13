@@ -11,8 +11,9 @@ import optax  # type: ignore
 
 from src.config import (BATCH_SIZE, CHECKPOINT_EVERY, CKPT_DIR, DATA_PATH,
                         KAGGLE_STAGED_DATA_PATH,
-                        DATA_SEED, DDIM_STEPS, EMA_DECAY, EVAL_TIMESTEPS,
-                        FID_BATCH_SIZE, FID_SAMPLES, FID_STEPS,
+                        DATA_SEED, DDIM_STEPS, EMA_DECAY, EPOCHS_TABLE_PATH,
+                        EVAL_TIMESTEPS,
+                        FID_BATCH_SIZE, FID_EVERY, FID_SAMPLES, FID_STEPS,
                         FIGURES_DIR, FINAL_LEARNING_RATE, GRADIENT_PLOT_PATH,
                         GUIDANCE_SCALE, HISTORY_PATH, IMAGE_SIZE,
                         KEEP_CHECKPOINTS, LEARNING_RATE, LOSS_PLOT_PATH,
@@ -24,7 +25,8 @@ from src.config import (BATCH_SIZE, CHECKPOINT_EVERY, CKPT_DIR, DATA_PATH,
 from src import checkpoint
 from src.data_loader import close_envs, make_data_splits
 from src.models import build_network  # This now needs to return a U-Net
-from src.plot import plot_gradients, plot_loss, plot_sample_quality
+from src.plot import (epochs_table, plot_gradients, plot_loss,
+                      plot_sample_quality)
 from src.diffusion import DiffusionSchedule, make_samplers
 from src.generate import to_uint8
 from src.metrics import load_inception, make_sample_quality_fn
@@ -211,7 +213,18 @@ print(
 
 
 def eval_fn(epoch, train_state):
-    return {**mse_fn(epoch, train_state), **quality_fn(epoch, train_state)}
+    metrics = mse_fn(epoch, train_state)
+    if epoch % FID_EVERY == 0 or epoch == N_EPOCHS:
+        metrics |= quality_fn(epoch, train_state)
+    return metrics
+
+
+save_checkpoint = checkpoint.saver(ckpt_mgr, meta)
+
+
+def checkpoint_fn(epoch, train_state, history, is_last):
+    save_checkpoint(epoch, train_state, history, is_last)
+    epochs_table(history).to_csv(EPOCHS_TABLE_PATH)
 
 
 key = jax.random.PRNGKey(SEED)
@@ -226,7 +239,7 @@ state, history = fit_model(
     n_epochs=N_EPOCHS,
     figures_dir=str(FIGURES_DIR),
     history=resumed_history,
-    checkpoint_fn=checkpoint.saver(ckpt_mgr, meta),
+    checkpoint_fn=checkpoint_fn,
     eval_fn=eval_fn,
 )
 
@@ -242,7 +255,6 @@ with open(STATE_PATH, "wb") as f:
 
 with open(HISTORY_PATH, "wb") as f:
     pickle.dump(history, f)
-
 save_params(state.model_state.params, TRAIN_WEIGHTS_PATH)
 print(f"Saved inference weights to: {TRAIN_WEIGHTS_PATH}")
 
