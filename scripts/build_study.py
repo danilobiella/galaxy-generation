@@ -37,29 +37,6 @@ from src.memorization import load_dataset, load_labels
 TEMPLATE = Path(__file__).resolve().parent.parent / "src" / "static" / "study.html"
 
 
-def generate_batched(generator, labels, seed, batch, steps, guidance):
-    """Sample one image per label, in fixed-size chunks.
-
-    `n_samples` is static in the compiled sampler, so a fixed chunk size means
-    one compile rather than one per distinct total. Two generators called with
-    identical labels, seed and chunking see identical initial noise, which is
-    what pairs the trials.
-    """
-    chunks = []
-    for start in range(0, len(labels), batch):
-        chunk = labels[start : start + batch]
-        chunks.append(
-            generator.generate(
-                n_samples=len(chunk),
-                seed=seed + start,
-                steps=steps,
-                labels=chunk,
-                guidance=guidance,
-            )
-        )
-    return np.concatenate(chunks)
-
-
 def sample_for(path, labels, seed, batch, steps, guidance, name):
     print(f"  loading {name} from {path} ...")
     generator = Generator.from_weights(path, image_size=IMAGE_SIZE, timesteps=TIMESTEPS)
@@ -67,7 +44,9 @@ def sample_for(path, labels, seed, batch, steps, guidance, name):
         raise SystemExit(f"{path} is unconditional; both checkpoints must be conditional.")
 
     start = time.time()
-    images = generate_batched(generator, labels, seed, batch, steps, guidance)
+    images = generator.generate_batched(
+        len(labels), batch, seed, steps=steps, labels=labels, guidance=guidance
+    )
     print(f"  {name}: {len(images)} images in {time.time() - start:.1f}s")
 
     del generator

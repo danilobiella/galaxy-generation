@@ -8,8 +8,8 @@ from PIL import Image
 
 from src.config import INCEPTION_WEIGHTS_PATH
 from src.data_loader import close_envs, process_features
-from src.metrics import (fid_score, inception_features, kid_score, load_images,
-                         load_inception)
+from src.metrics import (Reference, fid_score, inception_features, kid_score,
+                         load_images, load_inception)
 
 DATA = Path(__file__).parent / "data"
 
@@ -41,22 +41,22 @@ def test_features_do_not_depend_on_the_batch_size(inception):
 def test_fid_is_zero_on_itself_and_the_squared_shift_under_translation():
     feats = np.random.default_rng(0).normal(size=(500, 16))
     shift = np.full(16, 0.5)
-    assert fid_score(feats, feats) == pytest.approx(0.0, abs=1e-6)
-    assert fid_score(feats, feats + shift) == pytest.approx(shift @ shift, rel=1e-6)
+    assert fid_score(feats, Reference(feats)) == pytest.approx(0.0, abs=1e-6)
+    assert fid_score(feats, Reference(feats + shift)) == pytest.approx(shift @ shift, rel=1e-6)
 
 
 def test_fid_matches_the_closed_form_for_scaled_covariances():
     """N(0, I) against N(0, s²I) in d dimensions: FID = d (1 - s)²."""
     d, s = 4, 2.0
     a, b = np.random.default_rng(0).normal(size=(2, 100_000, d))
-    assert fid_score(a, s * b) == pytest.approx(d * (1 - s) ** 2, rel=0.05)
+    assert fid_score(a, Reference(s * b)) == pytest.approx(d * (1 - s) ** 2, rel=0.05)
 
 
 def test_kid_is_zero_within_a_distribution_and_positive_across():
     rng = np.random.default_rng(0)
     a, b = rng.normal(size=(2, 400, 64))
-    same_mean, same_std = kid_score(a, b, n_subsets=20, subset_size=200)
-    shifted_mean, _ = kid_score(a, b + 1.0, n_subsets=20, subset_size=200)
+    same_mean, same_std = kid_score(a, Reference(b), n_subsets=20, subset_size=200)
+    shifted_mean, _ = kid_score(a, Reference(b + 1.0), n_subsets=20, subset_size=200)
     assert abs(same_mean) < 3 * same_std
     assert shifted_mean > 10 * same_std
 

@@ -5,6 +5,7 @@ from functools import lru_cache
 from pathlib import Path
 
 import jax
+import jax.numpy as jnp
 import numpy as np
 
 from src.config import (
@@ -27,12 +28,56 @@ from src.diffusion import (
 from src.models import build_network, is_conditional
 from src.weights import load_params
 
-__all__ = ["SAMPLERS", "Generator", "load_generator", "random_seed", "to_uint8"]
+__all__ = [
+    "SAMPLERS",
+    "Generator",
+    "load_generator",
+    "random_seed",
+    "sample_batched",
+    "to_uint8",
+]
 
 
 def to_uint8(images) -> np.ndarray:
     array = np.asarray(jax.device_get(images))
     return np.rint(np.clip((array + 1.0) / 2.0 * 255.0, 0, 255)).astype(np.uint8)
+
+
+def sample_batched(
+    samplers,
+    params,
+    key: jax.Array,
+    n_samples: int,
+    batch_size: int,
+    steps: int,
+    labels=None,
+    guidance: float = GUIDANCE_SCALE,
+    eta: float = DDIM_ETA,
+    clip: bool = True,
+) -> np.ndarray:
+    """`n_samples` DDIM samples as uint8, drawn in batches of `batch_size`.
+
+    `n_samples` is static in the compiled sampler, so the last batch is padded
+    to full size rather than compiled again. Batch `i` uses `fold_in(key, i)`,
+    and `labels` are cycled to fill the padding.
+    """
+    n_batches = -(-n_samples // batch_size)
+    if labels is not None:
+        labels = np.resize(np.asarray(labels, dtype=np.int32), (n_batches, batch_size))
+    batches = [
+        samplers.run_ddim(
+            batch_size,
+            steps,
+            clip,
+            params,
+            jax.random.fold_in(key, i),
+            eta,
+            None if labels is None else jnp.asarray(labels[i]),
+            guidance,
+        )
+        for i in range(n_batches)
+    ]
+    return to_uint8(jnp.concatenate(batches))[:n_samples]
 
 
 def random_seed() -> int:
@@ -146,6 +191,29 @@ class Generator:
             )
 
         return to_uint8(latents)
+
+    def generate_batched(
+        self,
+        n_samples: int,
+        batch_size: int,
+        seed: int,
+        steps: int = DDIM_STEPS,
+        labels=None,
+        guidance: float = GUIDANCE_SCALE,
+    ) -> np.ndarray:
+        """Like `generate`, for more samples than fit in one batch. Generators
+        given the same seed, labels and batch size start from the same noise."""
+        labels = self.resolve_labels(n_samples, labels)
+        return sample_batched(
+            self.samplers,
+            self.params,
+            jax.random.PRNGKey(seed),
+            n_samples,
+            batch_size,
+            steps,
+            None if labels is None else jax.device_get(labels),
+            guidance,
+        )
 
     def generate_trajectory(
         self,

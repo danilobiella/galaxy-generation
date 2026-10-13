@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import time
 import urllib.request
-from pathlib import Path
+from functools import cached_property
 
 import jax
 import jax.numpy as jnp
@@ -21,12 +21,13 @@ from src import fidjax
 from src.config import (INCEPTION_WEIGHTS_PATH, INCEPTION_WEIGHTS_SHA256,
                         INCEPTION_WEIGHTS_URL)
 from src.data_loader import GalaxyLMDBDataSource, resize_image
-from src.generate import to_uint8
+from src.generate import sample_batched
 
-def load_inception(path: str | Path = INCEPTION_WEIGHTS_PATH) -> fidjax.FID:
+
+def load_inception() -> fidjax.FID:
     """The FID Inception network. The weights are a pickle, and unpickling runs
     code, so the file has to match the pinned hash before it is opened."""
-    path = Path(path)
+    path = INCEPTION_WEIGHTS_PATH
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         print(f"Downloading Inception weights to {path}...")
@@ -45,58 +46,74 @@ def load_inception(path: str | Path = INCEPTION_WEIGHTS_PATH) -> fidjax.FID:
 def inception_features(
     inception: fidjax.FID, images: np.ndarray, batch_size: int = 25
 ) -> np.ndarray:
-    """uint8 images (N, H, W, 3) to (N, 2048) float64 features."""
+    """uint8 images (N, H, W, 3) to (N, 2048) float64 features. The last batch
+    is padded to full size so Inception compiles once."""
     if images.dtype != np.uint8:
         raise TypeError(f"Expected uint8 images, got {images.dtype}.")
+    n = len(images)
+    pad = -n % batch_size
+    if pad:
+        images = np.concatenate([images, np.repeat(images[-1:], pad, axis=0)])
     feats = [
-        np.asarray(inception.compute_acts(jnp.asarray(images[i:i + batch_size])))
+        inception.compute_acts(jnp.asarray(images[i:i + batch_size]))
         for i in range(0, len(images), batch_size)
     ]
-    return np.concatenate(feats).astype(np.float64)
-
-
-def fid_score(feats_a: np.ndarray, feats_b: np.ndarray) -> float:
-    """tr sqrt(Σa Σb) as the summed square roots of the eigenvalues of the
-    symmetric Σa^½ Σb Σa^½, which has the same spectrum."""
-    mu_a, mu_b = feats_a.mean(axis=0), feats_b.mean(axis=0)
-    sigma_a = np.cov(feats_a, rowvar=False)
-    sigma_b = np.cov(feats_b, rowvar=False)
-
-    w, v = linalg.eigh(sigma_a)
-    sqrt_a = (v * np.sqrt(np.clip(w, 0.0, None))) @ v.T
-    eigvals = linalg.eigvalsh(sqrt_a @ sigma_b @ sqrt_a)
-    tr_covmean = np.sqrt(np.clip(eigvals, 0.0, None)).sum()
-
-    diff = mu_a - mu_b
-    return float(
-        diff @ diff + np.trace(sigma_a) + np.trace(sigma_b) - 2.0 * tr_covmean
-    )
+    return np.asarray(jnp.concatenate(feats))[:n].astype(np.float64)
 
 
 def _polynomial_kernel(x: np.ndarray, y: np.ndarray) -> np.ndarray:
     return (x @ y.T / x.shape[1] + 1.0) ** 3
 
 
+class Reference:
+    """Statistics of a fixed set of real features, computed once and shared by
+    every score against it."""
+
+    def __init__(self, feats: np.ndarray):
+        self.feats = feats
+        self.mu = feats.mean(axis=0)
+        self.sigma = np.cov(feats, rowvar=False)
+
+    @cached_property
+    def sqrt_sigma(self) -> np.ndarray:
+        w, v = linalg.eigh(self.sigma)
+        return (v * np.sqrt(np.clip(w, 0.0, None))) @ v.T
+
+    @cached_property
+    def kernel(self) -> np.ndarray:
+        return _polynomial_kernel(self.feats, self.feats)
+
+
+def fid_score(feats: np.ndarray, ref: Reference) -> float:
+    sigma = np.cov(feats, rowvar=False)
+    eigvals = linalg.eigvalsh(ref.sqrt_sigma @ sigma @ ref.sqrt_sigma)
+    tr_covmean = np.sqrt(np.clip(eigvals, 0.0, None)).sum()
+
+    diff = feats.mean(axis=0) - ref.mu
+    return float(
+        diff @ diff + np.trace(sigma) + np.trace(ref.sigma) - 2.0 * tr_covmean
+    )
+
+
 def kid_score(
-    feats_a: np.ndarray,
-    feats_b: np.ndarray,
+    feats: np.ndarray,
+    ref: Reference,
     n_subsets: int = 100,
     subset_size: int = 1000,
     seed: int = 0,
 ) -> tuple[float, float]:
     """Unbiased MMD² with a cubic polynomial kernel, as mean and std over
     random subsets of both sets."""
-    m = min(subset_size, len(feats_a), len(feats_b))
+    m = min(subset_size, len(feats), len(ref.feats))
     rng = np.random.default_rng(seed)
-    full_aa = _polynomial_kernel(feats_a, feats_a)
-    full_bb = _polynomial_kernel(feats_b, feats_b)
-    full_ab = _polynomial_kernel(feats_a, feats_b)
+    full_aa = _polynomial_kernel(feats, feats)
+    full_ab = _polynomial_kernel(feats, ref.feats)
     scores = np.empty(n_subsets)
     for i in range(n_subsets):
-        a = rng.choice(len(feats_a), m, replace=False)
-        b = rng.choice(len(feats_b), m, replace=False)
+        a = rng.choice(len(feats), m, replace=False)
+        b = rng.choice(len(ref.feats), m, replace=False)
         k_aa = full_aa[np.ix_(a, a)]
-        k_bb = full_bb[np.ix_(b, b)]
+        k_bb = ref.kernel[np.ix_(b, b)]
         k_ab = full_ab[np.ix_(a, b)]
         within = (k_aa.sum() - np.trace(k_aa) + k_bb.sum() - np.trace(k_bb)) / (
             m * (m - 1)
@@ -105,11 +122,9 @@ def kid_score(
     return float(scores.mean()), float(scores.std())
 
 
-def quality_scores(
-    feats: np.ndarray, real_feats: np.ndarray, seed: int = 0
-) -> dict[str, float]:
-    kid_mean, kid_std = kid_score(feats, real_feats, seed=seed)
-    return {"kid": kid_mean, "kid_std": kid_std, "fid": fid_score(feats, real_feats)}
+def quality_scores(feats: np.ndarray, ref: Reference, seed: int = 0) -> dict[str, float]:
+    kid_mean, kid_std = kid_score(feats, ref, seed=seed)
+    return {"kid": kid_mean, "kid_std": kid_std, "fid": fid_score(feats, ref)}
 
 
 def format_scores(scores: dict[str, float]) -> str:
@@ -144,32 +159,19 @@ def make_sample_quality_fn(
     One sample per real image, with that image's label, so the class mix
     matches. The noise is the same every epoch.
     """
-    real_feats = inception_features(inception, real_images, batch_size)
+    ref = Reference(inception_features(inception, real_images, batch_size))
     n = len(real_images)
-    n_batches = -(-n // batch_size)
-    labels = None if real_labels is None else np.resize(real_labels, n_batches * batch_size)
 
     def quality_fn(epoch, train_state):
         start = time.perf_counter()
-        generated = np.concatenate([
-            to_uint8(samplers.run_ddim(
-                batch_size,
-                steps,
-                True,
-                train_state.ema_params,
-                jax.random.fold_in(key, i),
-                0.0,
-                None if labels is None else jnp.asarray(
-                    labels[i * batch_size:(i + 1) * batch_size]
-                ),
-                guidance,
-            ))
-            for i in range(n_batches)
-        ])[:n]
+        generated = sample_batched(
+            samplers, train_state.ema_params, key, n, batch_size, steps,
+            real_labels, guidance,
+        )
         sampled = time.perf_counter()
         feats = inception_features(inception, generated, batch_size)
         featurized = time.perf_counter()
-        scores = quality_scores(feats, real_feats)
+        scores = quality_scores(feats, ref)
         print(
             f"[EPOCH {epoch}] {format_scores(scores)} | sampling {sampled - start:.0f}s, "
             f"inception {featurized - sampled:.0f}s, "

@@ -147,8 +147,6 @@ class DataSplits:
     train: TrainingData
     val: grain.MapDataset
     val_hash: str
-    val_indices: np.ndarray
-    val_labels: np.ndarray
 
 
 def _num_samples(db_path: str) -> int:
@@ -232,8 +230,9 @@ def make_data_splits(
     image_size: Optional[Tuple[int, int]] = None,
     augment: bool = True,
 ) -> DataSplits:
-    labels = read_labels(db_path)
-    train_idx, val_idx = stratified_split(labels, val_fraction, split_seed)
+    train_idx, val_idx = stratified_split(
+        read_labels(db_path), val_fraction, split_seed
+    )
 
     train = _training_data(
         GalaxyLMDBDataSource(db_path, train_idx), batch_size, seed, image_size, augment
@@ -252,7 +251,7 @@ def make_data_splits(
             f"of {batch_size}."
         )
 
-    return DataSplits(train, val, split_hash(val_idx), val_idx, labels[val_idx])
+    return DataSplits(train, val, split_hash(val_idx))
 
 
 def make_overfit_loader(

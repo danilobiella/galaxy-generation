@@ -26,7 +26,8 @@ from src.data_loader import close_envs, make_data_splits
 from src.models import build_network  # This now needs to return a U-Net
 from src.plot import plot_gradients, plot_loss, plot_sample_quality
 from src.diffusion import DiffusionSchedule, make_samplers
-from src.metrics import load_images, load_inception, make_sample_quality_fn
+from src.generate import to_uint8
+from src.metrics import load_inception, make_sample_quality_fn
 from src.train import fit_model, make_eval_fn, make_model_fns, make_train_fns
 from src.weights import save_params
 
@@ -191,20 +192,19 @@ mse_fn = make_eval_fn(
 
 print("Loading Inception and featurizing the validation images...")
 phase_start = time.perf_counter()
-fid_order = np.random.default_rng(SPLIT_SEED).permutation(len(splits.val_indices))
-fid_order = fid_order[:FID_SAMPLES]
+val_images, val_labels = (np.concatenate(a)[:FID_SAMPLES] for a in zip(*splits.val))
 quality_fn = make_sample_quality_fn(
     samplers=samplers,
     inception=load_inception(),
-    real_images=load_images(db_path, splits.val_indices[fid_order], IMAGE_SIZE),
-    real_labels=None if NUM_CLASSES is None else splits.val_labels[fid_order],
+    real_images=to_uint8(val_images),
+    real_labels=None if NUM_CLASSES is None else val_labels,
     key=fid_key,
     steps=FID_STEPS,
     guidance=GUIDANCE_SCALE,
     batch_size=FID_BATCH_SIZE,
 )
 print(
-    f"FID/KID set up on {len(fid_order)} validation images in "
+    f"FID/KID set up on {len(val_images)} validation images in "
     f"{time.perf_counter() - phase_start:.1f}s"
 )
 

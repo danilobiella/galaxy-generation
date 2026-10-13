@@ -17,8 +17,8 @@ from src.config import (DATA_PATH, DDIM_STEPS, GUIDANCE_SCALE, IMAGE_SIZE,
                         SPLIT_SEED, TIMESTEPS, VAL_FRACTION, WEIGHTS_PATH)
 from src.data_loader import read_labels, stratified_split
 from src.generate import Generator
-from src.metrics import (format_scores, inception_features, load_images,
-                         load_inception, quality_scores)
+from src.metrics import (Reference, format_scores, inception_features,
+                         load_images, load_inception, quality_scores)
 
 
 def main() -> None:
@@ -43,24 +43,24 @@ def main() -> None:
     )
     print(f"Generating {n} images ({args.steps} DDIM steps, guidance {args.guidance})...")
     start = time.time()
-    generated = np.concatenate([
-        generator.generate(
-            n_samples=len(chunk),
-            seed=args.seed + i,
-            steps=args.steps,
-            labels=chunk if generator.conditional else None,
-            guidance=args.guidance,
-        )
-        for i, chunk in enumerate(np.array_split(gen_labels, -(-n // args.chunk)))
-    ])
+    generated = generator.generate_batched(
+        n,
+        args.chunk,
+        args.seed,
+        steps=args.steps,
+        labels=gen_labels if generator.conditional else None,
+        guidance=args.guidance,
+    )
     print(f"Generated in {time.time() - start:.1f}s")
 
     inception = load_inception()
-    val = inception_features(inception, load_images(DATA_PATH, val_idx, IMAGE_SIZE))
+    val = Reference(
+        inception_features(inception, load_images(DATA_PATH, val_idx, IMAGE_SIZE))
+    )
     floor = inception_features(inception, load_images(DATA_PATH, floor_idx, IMAGE_SIZE))
     gen = inception_features(inception, generated)
 
-    print(f"\nAgainst {len(val)} validation images, N = {n}:")
+    print(f"\nAgainst {len(val.feats)} validation images, N = {n}:")
     for name, feats in (("generated", gen), ("real (floor)", floor)):
         print(f"  {name:<13} {format_scores(quality_scores(feats, val, args.seed))}")
 
