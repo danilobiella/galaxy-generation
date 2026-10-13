@@ -4,6 +4,8 @@ import logging
 import os
 import sys
 
+import jax
+
 LOGGER_NAME = "galaxy"
 
 RESET = "\033[0m"
@@ -71,3 +73,24 @@ def setup_logging(
 
     logger.setLevel(level)
     return logger
+
+
+def format_duration(seconds: float) -> str:
+    if seconds < 60:
+        return f"{seconds:.1f} s"
+    if seconds < 3600:
+        return f"{seconds / 60:.1f} min"
+    if seconds < 86400:
+        return f"{seconds / 3600:.1f} h"
+    return f"{seconds / 86400:.1f} d"
+
+
+def peak_memory() -> str:
+    parts = []
+    for d in jax.local_devices():
+        stats = d.memory_stats() or {}
+        if "peak_bytes_in_use" in stats:
+            used = stats["peak_bytes_in_use"] / 2**30
+            limit = stats.get("bytes_limit", 0) / 2**30
+            parts.append(f"{d.id}: {used:.1f}/{limit:.1f} GB")
+    return ", ".join(parts) or "n/a"

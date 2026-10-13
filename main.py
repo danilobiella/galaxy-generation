@@ -30,8 +30,8 @@ from src.plot import (epochs_table, plot_gradients, plot_loss,
 from src.diffusion import DiffusionSchedule, make_samplers
 from src.generate import to_uint8
 from src.metrics import load_inception, make_sample_quality_fn
-from src.train import (fit_model, format_duration, make_eval_fn,
-                       make_model_fns, make_train_fns)
+from src.logs import format_duration
+from src.train import fit_model, make_eval_fn, make_model_fns, make_train_fns
 from src.weights import save_params
 
 sys.stdout.reconfigure(line_buffering=True)

@@ -22,7 +22,7 @@ from src.config import (INCEPTION_WEIGHTS_PATH, INCEPTION_WEIGHTS_SHA256,
                         INCEPTION_WEIGHTS_URL)
 from src.data_loader import GalaxyLMDBDataSource, resize_image
 from src.generate import sample_batched
-from src.train import format_duration
+from src.logs import format_duration
 
 
 def load_inception() -> fidjax.FID:

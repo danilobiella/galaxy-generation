@@ -11,6 +11,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import optax  # type: ignore
 
+from src.logs import format_duration, peak_memory
+
 if TYPE_CHECKING:
     from src.diffusion import DiffusionSchedule, Samplers
 
@@ -276,27 +278,6 @@ def train_epoch(
 
     print(f"[Ep {epoch}/{n_epochs}] waited {format_duration(data_wait)} for data")
     return train_state, epoch_metrics
-
-
-def format_duration(seconds: float) -> str:
-    if seconds < 60:
-        return f"{seconds:.1f} s"
-    if seconds < 3600:
-        return f"{seconds / 60:.1f} min"
-    if seconds < 86400:
-        return f"{seconds / 3600:.1f} h"
-    return f"{seconds / 86400:.1f} d"
-
-
-def peak_memory() -> str:
-    parts = []
-    for d in jax.local_devices():
-        stats = d.memory_stats() or {}
-        if "peak_bytes_in_use" in stats:
-            used = stats["peak_bytes_in_use"] / 2**30
-            limit = stats.get("bytes_limit", 0) / 2**30
-            parts.append(f"{d.id}: {used:.1f}/{limit:.1f} GB")
-    return ", ".join(parts) or "n/a"
 
 
 def fit_model(
