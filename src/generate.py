@@ -5,7 +5,6 @@ from functools import lru_cache
 from pathlib import Path
 
 import jax
-import jax.numpy as jnp
 import numpy as np
 
 from src.config import (
@@ -54,30 +53,44 @@ def sample_batched(
     guidance: float = GUIDANCE_SCALE,
     eta: float = DDIM_ETA,
     clip: bool = True,
+    devices=None,
 ) -> np.ndarray:
     """`n_samples` DDIM samples as uint8, drawn in batches of `batch_size`.
 
     `n_samples` is static in the compiled sampler, so the last batch is padded
     to full size rather than compiled again. Batch `i` uses `fold_in(key, i)`,
     and `labels` are cycled to fill the padding.
+
+    Batches are spread round-robin over `devices` (all local devices by
+    default) and all dispatched before any is collected, so the devices run
+    concurrently. A batch's noise depends only on its index, so the samples
+    are the same whatever the number of devices.
     """
+    devices = jax.local_devices() if devices is None else devices
+    replicas = [jax.device_put(params, d) for d in devices]
     n_batches = -(-n_samples // batch_size)
     if labels is not None:
         labels = np.resize(np.asarray(labels, dtype=np.int32), (n_batches, batch_size))
-    batches = [
-        samplers.run_ddim(
-            batch_size,
-            steps,
-            clip,
-            params,
-            jax.random.fold_in(key, i),
-            eta,
-            None if labels is None else jnp.asarray(labels[i]),
-            guidance,
+    keys = jax.device_get(
+        jax.vmap(jax.random.fold_in, in_axes=(None, 0))(key, np.arange(n_batches))
+    )
+
+    batches = []
+    for i in range(n_batches):
+        d = i % len(devices)
+        batches.append(
+            samplers.run_ddim(
+                batch_size,
+                steps,
+                clip,
+                replicas[d],
+                jax.device_put(keys[i], devices[d]),
+                eta,
+                None if labels is None else jax.device_put(labels[i], devices[d]),
+                guidance,
+            )
         )
-        for i in range(n_batches)
-    ]
-    return to_uint8(jnp.concatenate(batches))[:n_samples]
+    return np.concatenate([to_uint8(b) for b in batches])[:n_samples]
 
 
 def random_seed() -> int:

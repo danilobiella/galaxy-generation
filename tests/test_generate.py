@@ -3,8 +3,12 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
+from conftest import IMAGE_SHAPE, StubUNet
+
 import src.generate as generate_module
-from src.generate import Generator, load_generator, random_seed, to_uint8
+from src.diffusion import make_samplers
+from src.generate import (Generator, load_generator, random_seed, sample_batched,
+                          to_uint8)
 from src.weights import save_params
 
 IMAGE_SIZE = (8, 8)
@@ -226,3 +230,23 @@ class TestLoadGenerator:
         a = load_generator(path, image_size=IMAGE_SIZE, timesteps=TIMESTEPS)
         b = load_generator(path, image_size=IMAGE_SIZE, timesteps=TIMESTEPS)
         assert a is b
+
+
+def test_sample_batched_gives_the_same_images_on_one_device_and_two(schedule):
+    devices = jax.local_devices()
+    assert len(devices) >= 2, "conftest should expose two CPU devices"
+    unet = StubUNet(lambda params, x, t, y: params["w"] * x)
+    samplers = make_samplers(unet, schedule, IMAGE_SHAPE, num_classes=NUM_CLASSES)
+    run = dict(
+        samplers=samplers,
+        params={"w": jnp.array(0.3)},
+        key=jax.random.PRNGKey(0),
+        n_samples=7,
+        batch_size=3,
+        steps=5,
+        labels=np.arange(7) % NUM_CLASSES,
+    )
+    one = sample_batched(**run, devices=devices[:1])
+    two = sample_batched(**run, devices=devices[:2])
+    assert one.shape == (7, *IMAGE_SHAPE)
+    np.testing.assert_array_equal(one, two)

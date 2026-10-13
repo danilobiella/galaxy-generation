@@ -33,6 +33,7 @@ from src.weights import save_params
 
 sys.stdout.reconfigure(line_buffering=True)
 print("Running on Kaggle" if ON_KAGGLE else "Running locally")
+print(f"JAX {jax.__version__} | devices: {jax.devices()}")
 
 # %% -- data ---------------------------------------------------------------
 
