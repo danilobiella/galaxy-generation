@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.ticker import MaxNLocator
 
 WINDOW = 100
 TIMESTEP_RAMP = LinearSegmentedColormap.from_list(
@@ -61,9 +62,31 @@ def plot_loss(history: dict, filepath: str = "loss_plot.png"):
 
     ax.set_yscale("log")
     ax.grid(alpha=0.3, linewidth=0.5)
-    ax.set_xticks(epochs)
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     ax.set_xlabel("epoch")
     ax.set_ylabel("MSE (noise prediction)")
     ax.legend(loc="center left", bbox_to_anchor=(1.01, 0.5))
+    fig.tight_layout()
+    fig.savefig(filepath, dpi=300)
+
+
+def plot_sample_quality(history: dict, filepath: str = "sample_quality_plot.png"):
+    epochs = np.arange(1, len(history["kid"]) + 1)
+    kid = np.asarray(history["kid"]) * 1e3
+    kid_std = np.asarray(history["kid_std"]) * 1e3
+
+    fig, (ax_kid, ax_fid) = plt.subplots(2, 1, figsize=(9, 6), sharex=True)
+
+    ax_kid.fill_between(epochs, kid - kid_std, kid + kid_std, color="#2a78d6", alpha=0.2, linewidth=0)
+    ax_kid.plot(epochs, kid, linewidth=2, color="#2a78d6")
+    ax_kid.set_ylabel("KID (×10⁻³)")
+
+    ax_fid.plot(epochs, history["fid"], linewidth=2, color="#2b2b2b")
+    ax_fid.set_ylabel("FID")
+    ax_fid.set_xlabel("epoch")
+    ax_fid.xaxis.set_major_locator(MaxNLocator(integer=True))
+
+    for ax in (ax_kid, ax_fid):
+        ax.grid(alpha=0.3, linewidth=0.5)
     fig.tight_layout()
     fig.savefig(filepath, dpi=300)

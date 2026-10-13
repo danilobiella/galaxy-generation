@@ -59,7 +59,7 @@ cuda = "12"
 [tool.kaggle_bundler]
 entrypoint = "main.py"
 include = ["src"]
-pip_deps = ["dm-haiku", "lmdb", "safetensors", "orbax-checkpoint"]
+pip_deps = ["dm-haiku", "lmdb", "safetensors", "orbax-checkpoint", "flax>=0.10.4,<0.11"]
 output = ".kaggle_push/script.py"
 
 [tool.pytest.ini_options]

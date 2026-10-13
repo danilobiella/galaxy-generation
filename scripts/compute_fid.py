@@ -17,8 +17,8 @@ from src.config import (DATA_PATH, DDIM_STEPS, GUIDANCE_SCALE, IMAGE_SIZE,
                         SPLIT_SEED, TIMESTEPS, VAL_FRACTION, WEIGHTS_PATH)
 from src.data_loader import read_labels, stratified_split
 from src.generate import Generator
-from src.metrics import (fid_score, inception_features, kid_score, load_images,
-                         load_inception)
+from src.metrics import (format_scores, inception_features, load_images,
+                         load_inception, quality_scores)
 
 
 def main() -> None:
@@ -62,11 +62,7 @@ def main() -> None:
 
     print(f"\nAgainst {len(val)} validation images, N = {n}:")
     for name, feats in (("generated", gen), ("real (floor)", floor)):
-        kid_mean, kid_std = kid_score(feats, val, seed=args.seed)
-        print(
-            f"  {name:<13} FID {fid_score(feats, val):8.2f} | "
-            f"KID {kid_mean * 1e3:7.2f} ± {kid_std * 1e3:.2f} ×10⁻³"
-        )
+        print(f"  {name:<13} {format_scores(quality_scores(feats, val, args.seed))}")
 
 
 if __name__ == "__main__":

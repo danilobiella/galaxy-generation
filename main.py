@@ -1,6 +1,7 @@
 import pickle
 import shutil
 import sys
+import time
 
 import haiku as hk
 import jax
@@ -11,18 +12,21 @@ import optax  # type: ignore
 from src.config import (BATCH_SIZE, CHECKPOINT_EVERY, CKPT_DIR, DATA_PATH,
                         KAGGLE_STAGED_DATA_PATH,
                         DATA_SEED, DDIM_STEPS, EMA_DECAY, EVAL_TIMESTEPS,
+                        FID_BATCH_SIZE, FID_SAMPLES, FID_STEPS,
                         FIGURES_DIR, FINAL_LEARNING_RATE, GRADIENT_PLOT_PATH,
                         GUIDANCE_SCALE, HISTORY_PATH, IMAGE_SIZE,
                         KEEP_CHECKPOINTS, LEARNING_RATE, LOSS_PLOT_PATH,
                         MODEL_DIM, MODEL_DIM_MULTS, N_EPOCHS, NUM_CLASSES,
-                        ON_KAGGLE, P_UNCOND, RESUME, RUNS_DIR, SEED,
+                        ON_KAGGLE, P_UNCOND, RESUME, RUNS_DIR,
+                        SAMPLE_QUALITY_PLOT_PATH, SEED,
                         SPLIT_SEED, STATE_PATH, TIMESTEPS, TRAIN_WEIGHTS_PATH,
                         VAL_FRACTION, WARMUP_STEPS)
 from src import checkpoint
 from src.data_loader import close_envs, make_data_splits
 from src.models import build_network  # This now needs to return a U-Net
-from src.plot import plot_gradients, plot_loss
+from src.plot import plot_gradients, plot_loss, plot_sample_quality
 from src.diffusion import DiffusionSchedule, make_samplers
+from src.metrics import load_images, load_inception, make_sample_quality_fn
 from src.train import fit_model, make_eval_fn, make_model_fns, make_train_fns
 from src.weights import save_params
 
@@ -173,15 +177,41 @@ if resumed is not None:
 
 # %% -- train --------------------------------------------------------------
 
-eval_fn = make_eval_fn(
+mse_key, fid_key = jax.random.split(jax.random.PRNGKey(SPLIT_SEED))
+
+mse_fn = make_eval_fn(
     unet=unet,
     schedule=diffusion_schedule,
     val_batches=splits.val,
-    key=jax.random.PRNGKey(SPLIT_SEED),
+    key=mse_key,
     timesteps=np.arange(EVAL_TIMESTEPS) * (TIMESTEPS // EVAL_TIMESTEPS)
     + TIMESTEPS // (2 * EVAL_TIMESTEPS),
     num_classes=NUM_CLASSES,
 )
+
+print("Loading Inception and featurizing the validation images...")
+phase_start = time.perf_counter()
+fid_order = np.random.default_rng(SPLIT_SEED).permutation(len(splits.val_indices))
+fid_order = fid_order[:FID_SAMPLES]
+quality_fn = make_sample_quality_fn(
+    samplers=samplers,
+    inception=load_inception(),
+    real_images=load_images(db_path, splits.val_indices[fid_order], IMAGE_SIZE),
+    real_labels=None if NUM_CLASSES is None else splits.val_labels[fid_order],
+    key=fid_key,
+    steps=FID_STEPS,
+    guidance=GUIDANCE_SCALE,
+    batch_size=FID_BATCH_SIZE,
+)
+print(
+    f"FID/KID set up on {len(fid_order)} validation images in "
+    f"{time.perf_counter() - phase_start:.1f}s"
+)
+
+
+def eval_fn(epoch, train_state):
+    return {**mse_fn(epoch, train_state), **quality_fn(epoch, train_state)}
+
 
 key = jax.random.PRNGKey(SEED)
 state, history = fit_model(
@@ -224,4 +254,5 @@ print(f"Saved EMA weights to: {EMA_WEIGHTS_PATH}")
 # %% -- plots --------------------------------------------------------------
 
 plot_loss(history, str(LOSS_PLOT_PATH))
+plot_sample_quality(history, str(SAMPLE_QUALITY_PLOT_PATH))
 plot_gradients(history, str(GRADIENT_PLOT_PATH))
