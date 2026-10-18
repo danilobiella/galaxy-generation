@@ -11,9 +11,10 @@ LOGGER_NAME = "galaxy"
 RESET = "\033[0m"
 DIM = "\033[2m"
 CYAN = "\033[36m"
+GREEN = "\033[32m"
 LEVEL_COLORS = {
     logging.DEBUG: "\033[34m",
-    logging.INFO: "\033[32m",
+    logging.INFO: GREEN,
     logging.WARNING: "\033[33m",
     logging.ERROR: "\033[31m",
     logging.CRITICAL: "\033[1;31m",
@@ -26,6 +27,10 @@ def use_color() -> bool:
     if os.environ.get("FORCE_COLOR"):
         return True
     return sys.stdout.isatty()
+
+
+def green(text: str) -> str:
+    return f"{GREEN}{text}{RESET}" if use_color() else text
 
 
 class ColorFormatter(logging.Formatter):
