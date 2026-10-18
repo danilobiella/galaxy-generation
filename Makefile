@@ -76,8 +76,7 @@ quality-floor: $(QUALITY_FLOOR_FILE)
 
 $(QUALITY_FLOOR_FILE): scripts/quality_floor.py src/config.py src/data_loader.py src/metrics.py src/fidjax.py | $(BIN_DATA_FILES)
 	@echo "$(GREEN)Computing the real-vs-real quality floor...$(RESET)"
-	XLA_FLAGS=--xla_gpu_autotune_level=0 python -m scripts.quality_floor
-	touch $@
+	XLA_FLAGS=--xla_gpu_autotune_level=0 python -m scripts.quality_floor --force
 
 # Serve the model
 api:
