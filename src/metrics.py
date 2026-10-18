@@ -19,19 +19,19 @@ import numpy as np
 from scipy import linalg
 
 from src import fidjax
-from src.config import (FID_FLOOR_PATH, INCEPTION_WEIGHTS_PATH,
-                        INCEPTION_WEIGHTS_SHA256, INCEPTION_WEIGHTS_URL)
+from src.config import (INCEPTION_WEIGHTS_PATH, INCEPTION_WEIGHTS_SHA256,
+                        INCEPTION_WEIGHTS_URL, QUALITY_FLOOR_PATH)
 from src.data_loader import GalaxyLMDBDataSource, resize_image
 from src.generate import sample_batched
 from src.logs import format_duration
 
 
 def load_floor(val_hash: str | None = None) -> dict | None:
-    """The saved real-vs-real scores from `scripts.fid_floor`, or None if they
+    """The saved real-vs-real scores from `scripts.quality_floor`, or None if they
     are missing or were computed on a different validation split."""
-    if not FID_FLOOR_PATH.exists():
+    if not QUALITY_FLOOR_PATH.exists():
         return None
-    floor = json.loads(FID_FLOOR_PATH.read_text())
+    floor = json.loads(QUALITY_FLOOR_PATH.read_text())
     if val_hash is not None and floor["val_split_hash"] != val_hash:
         return None
     return floor
