@@ -74,8 +74,16 @@ def inception_features(
     return np.asarray(jnp.concatenate(feats))[:n].astype(np.float64)
 
 
+NEAREST_K = 5
+
+
 def _polynomial_kernel(x: np.ndarray, y: np.ndarray) -> np.ndarray:
     return (x @ y.T / x.shape[1] + 1.0) ** 3
+
+
+def _squared_distances(x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    d = (x * x).sum(axis=1)[:, None] + (y * y).sum(axis=1)[None, :] - 2.0 * x @ y.T
+    return np.maximum(d, 0.0)
 
 
 class Reference:
@@ -95,6 +103,13 @@ class Reference:
     @cached_property
     def kernel(self) -> np.ndarray:
         return _polynomial_kernel(self.feats, self.feats)
+
+    @cached_property
+    def knn_radii(self) -> np.ndarray:
+        """Squared distance from each feature to its `NEAREST_K`-th nearest
+        neighbour among the others."""
+        d = _squared_distances(self.feats, self.feats)
+        return np.partition(d, NEAREST_K, axis=1)[:, NEAREST_K]
 
 
 def fid_score(feats: np.ndarray, ref: Reference) -> float:
@@ -135,15 +150,33 @@ def kid_score(
     return float(scores.mean()), float(scores.std())
 
 
+def density_coverage(feats: np.ndarray, ref: Reference) -> tuple[float, float]:
+    """Density and coverage (Naeem et al. 2020) over k-NN balls around the real
+    features. Density is fidelity: how many real balls a sample falls in, ~1
+    for real data. Coverage is diversity: the fraction of real balls holding at
+    least one sample."""
+    inside = _squared_distances(feats, ref.feats) < ref.knn_radii[None, :]
+    density = inside.sum() / (NEAREST_K * len(feats))
+    return float(density), float(inside.any(axis=0).mean())
+
+
 def quality_scores(feats: np.ndarray, ref: Reference, seed: int = 0) -> dict[str, float]:
     kid_mean, kid_std = kid_score(feats, ref, seed=seed)
-    return {"kid": kid_mean, "kid_std": kid_std, "fid": fid_score(feats, ref)}
+    density, coverage = density_coverage(feats, ref)
+    return {
+        "kid": kid_mean,
+        "kid_std": kid_std,
+        "fid": fid_score(feats, ref),
+        "density": density,
+        "coverage": coverage,
+    }
 
 
 def format_scores(scores: dict[str, float]) -> str:
     return (
         f"KID {scores['kid'] * 1e3:.2f} ± {scores['kid_std'] * 1e3:.2f} ×10⁻³ | "
-        f"FID {scores['fid']:.2f}"
+        f"FID {scores['fid']:.2f} | "
+        f"density {scores['density']:.3f} | coverage {scores['coverage']:.3f}"
     )
 
 

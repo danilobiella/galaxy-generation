@@ -8,8 +8,9 @@ from PIL import Image
 
 from src.config import INCEPTION_WEIGHTS_PATH
 from src.data_loader import close_envs, process_features
-from src.metrics import (Reference, fid_score, inception_features, kid_score,
-                         load_images, load_inception)
+from src.metrics import (Reference, density_coverage, fid_score,
+                         inception_features, kid_score, load_images,
+                         load_inception)
 
 DATA = Path(__file__).parent / "data"
 
@@ -59,6 +60,17 @@ def test_kid_is_zero_within_a_distribution_and_positive_across():
     shifted_mean, _ = kid_score(a, Reference(b + 1.0), n_subsets=20, subset_size=200)
     assert abs(same_mean) < 3 * same_std
     assert shifted_mean > 10 * same_std
+
+
+def test_density_and_coverage_separate_fidelity_from_diversity():
+    rng = np.random.default_rng(0)
+    real, same = rng.normal(size=(2, 1000, 16))
+    ref = Reference(real)
+    density, coverage = density_coverage(same, ref)
+    collapsed = density_coverage(same[:, :1] * np.ones(16) * 0.1, ref)
+    assert density == pytest.approx(1.0, abs=0.15)
+    assert coverage == pytest.approx(1 - 0.5**5, abs=0.03)
+    assert collapsed[1] < 0.2
 
 
 def test_real_images_are_resized_like_the_training_images(tmp_path):
