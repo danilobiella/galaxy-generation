@@ -17,6 +17,8 @@ if SMOKE:
     RUNS_DIR = RUNS_DIR / "smoke"
 CHECKPOINTS_DIR = Path("model_checkpoints")
 STUDY_DIR = Path("study")
+RESULTS_DIR = Path("results")
+FID_FLOOR_PATH = RESULTS_DIR / "fid_floor.json"
 
 FIGURES_DIR = RUNS_DIR / "figures"
 STATE_PATH = RUNS_DIR / "state.pkl"

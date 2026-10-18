@@ -72,7 +72,9 @@ def plot_loss(history: dict, filepath: str = "loss_plot.png"):
     fig.savefig(filepath, dpi=300)
 
 
-def plot_sample_quality(history: dict, filepath: str = "sample_quality_plot.png"):
+def plot_sample_quality(
+    history: dict, filepath: str = "sample_quality_plot.png", floor: dict | None = None
+):
     table = epochs_table(history).dropna(subset=["kid"])
     epochs = table.index
     kid = table["kid"] * 1e3
@@ -81,13 +83,19 @@ def plot_sample_quality(history: dict, filepath: str = "sample_quality_plot.png"
     fig, (ax_kid, ax_fid) = plt.subplots(2, 1, figsize=(9, 6), sharex=True)
 
     ax_kid.fill_between(epochs, kid - kid_std, kid + kid_std, color="#2a78d6", alpha=0.2, linewidth=0)
-    ax_kid.plot(epochs, kid, linewidth=2, color="#2a78d6")
+    ax_kid.plot(epochs, kid, linewidth=2, color="#2a78d6", label="generated")
     ax_kid.set_ylabel("KID (×10⁻³)")
 
-    ax_fid.plot(epochs, table["fid"], linewidth=2, color="#2b2b2b")
+    ax_fid.plot(epochs, table["fid"], linewidth=2, color="#2b2b2b", label="generated")
     ax_fid.set_ylabel("FID")
     ax_fid.set_xlabel("epoch")
     ax_fid.xaxis.set_major_locator(MaxNLocator(integer=True))
+
+    if floor is not None:
+        label = f"real vs real (N = {floor['n']})"
+        for ax, value in ((ax_kid, floor["kid"] * 1e3), (ax_fid, floor["fid"])):
+            ax.axhline(value, color="#8a8a8a", linestyle="--", linewidth=1.5, label=label)
+            ax.legend(loc="upper right")
 
     for ax in (ax_kid, ax_fid):
         ax.grid(alpha=0.3, linewidth=0.5)

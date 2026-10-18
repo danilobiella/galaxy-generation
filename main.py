@@ -29,7 +29,7 @@ from src.plot import (epochs_table, plot_gradients, plot_loss,
                       plot_sample_quality)
 from src.diffusion import DiffusionSchedule, make_samplers
 from src.generate import to_uint8
-from src.metrics import load_inception, make_sample_quality_fn
+from src.metrics import load_floor, load_inception, make_sample_quality_fn
 from src.logs import format_duration
 from src.train import fit_model, make_eval_fn, make_model_fns, make_train_fns
 from src.weights import save_params
@@ -270,5 +270,7 @@ print(f"Saved EMA weights to: {EMA_WEIGHTS_PATH}")
 # %% -- plots --------------------------------------------------------------
 
 plot_loss(history, str(LOSS_PLOT_PATH))
-plot_sample_quality(history, str(SAMPLE_QUALITY_PLOT_PATH))
+plot_sample_quality(
+    history, str(SAMPLE_QUALITY_PLOT_PATH), floor=load_floor(splits.val_hash)
+)
 plot_gradients(history, str(GRADIENT_PLOT_PATH))

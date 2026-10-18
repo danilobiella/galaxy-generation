@@ -23,7 +23,9 @@ import numpy as np  # noqa: E402
 from PIL import Image  # noqa: E402
 
 from src.config import RUNS_DIR  # noqa: E402
-from src.plot import WINDOW, plot_gradients, plot_loss  # noqa: E402
+from src.metrics import load_floor  # noqa: E402
+from src.plot import (WINDOW, plot_gradients, plot_loss,  # noqa: E402
+                      plot_sample_quality)
 
 DEFAULT_RUN_DIR = RUNS_DIR
 DIFFUSION_KEYS = {"loss", "grad_norm", "param_norm", "epochs"}
@@ -162,6 +164,10 @@ def main() -> None:
     written = [run_dir / "loss_plot.png", run_dir / "gradient_plot.png"]
     plot_loss(history, str(written[0]))
     plot_gradients(history, str(written[1]), window=args.window)
+
+    if any("kid" in record for record in history["epochs"]):
+        written.append(run_dir / "sample_quality_plot.png")
+        plot_sample_quality(history, str(written[-1]), floor=load_floor())
 
     sheet = run_dir / "samples_by_epoch.png"
     if sample_sheet(run_dir, sheet):

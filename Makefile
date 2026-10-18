@@ -3,6 +3,7 @@ RESET := \033[0m
 
 RAW_DATA_FILE := data/Galaxy10_DECals.h5
 BIN_DATA_FILES := data/galaxy10_decals_lmdb
+FID_FLOOR_FILE := results/fid_floor.json
 
 KAGGLE_DATASET_STAGING := .kaggle_dataset
 KAGGLE_STAGING := .kaggle_push
@@ -13,7 +14,7 @@ API_PORT := 8000
 DOCKER_IMAGE := galaxy-api
 HF_SPACE := galaxy-generation
 
-.PHONY: data kaggle-dataset-stage kaggle-dataset-push kaggle-dataset-clean \
+.PHONY: data fid-floor kaggle-dataset-stage kaggle-dataset-push kaggle-dataset-clean \
         kaggle-stage kaggle-push kaggle-clean test smoke api api-cpu \
         docker-build docker-run hf-check hf-deploy
 
@@ -30,6 +31,7 @@ $(RAW_DATA_FILE):
 $(BIN_DATA_FILES): $(RAW_DATA_FILE) scripts/process_data.py
 	@echo "$(GREEN)Processing raw data into binary format...$(RESET)"
 	python scripts/process_data.py
+	touch $@
 
 # Upload dataset on kaggle
 kaggle-dataset-stage: kaggle-dataset-clean $(BIN_DATA_FILES)
@@ -68,6 +70,14 @@ smoke:
 	@echo "$(GREEN)Running smoke training...$(RESET)"
 	rm -rf runs/smoke
 	SMOKE=1 XLA_FLAGS=--xla_gpu_autotune_level=0 python main.py
+
+# Real-vs-real FID/KID floor for the training scores
+fid-floor: $(FID_FLOOR_FILE)
+
+$(FID_FLOOR_FILE): scripts/fid_floor.py src/config.py src/data_loader.py src/metrics.py src/fidjax.py | $(BIN_DATA_FILES)
+	@echo "$(GREEN)Computing the real-vs-real FID/KID floor...$(RESET)"
+	XLA_FLAGS=--xla_gpu_autotune_level=0 python -m scripts.fid_floor
+	touch $@
 
 # Serve the model
 api:
