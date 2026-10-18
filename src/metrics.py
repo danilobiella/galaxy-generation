@@ -21,8 +21,8 @@ from scipy import linalg
 from src import fidjax
 from src.config import (INCEPTION_WEIGHTS_PATH, INCEPTION_WEIGHTS_SHA256,
                         INCEPTION_WEIGHTS_URL, QUALITY_FLOOR_PATH)
-from src.data_loader import GalaxyLMDBDataSource, resize_image
-from src.generate import sample_batched
+from src.data_loader import DataSplits, GalaxyLMDBDataSource, resize_image
+from src.generate import sample_batched, to_uint8
 from src.logs import format_duration
 
 
@@ -190,6 +190,56 @@ def load_images(
     )
 
 
+def eval_keys(seed: int) -> tuple[jax.Array, jax.Array]:
+    """The val-MSE and sample-quality noise keys. Every script scoring against
+    the training numbers derives them here, so they all use the same noise."""
+    mse_key, quality_key = jax.random.split(jax.random.PRNGKey(seed))
+    return mse_key, quality_key
+
+
+def quality_reference(
+    splits: DataSplits, n: int | None = None
+) -> tuple[np.ndarray, np.ndarray]:
+    """The validation images (uint8) and labels every quality score is
+    measured against, in the order training sees them."""
+    images, labels = (np.concatenate(a)[:n] for a in zip(*splits.val))
+    return to_uint8(images), labels
+
+
+def score_samples(
+    samplers,
+    params,
+    inception: fidjax.FID,
+    ref: Reference,
+    key: jax.Array,
+    n: int,
+    labels: np.ndarray | None,
+    steps: int,
+    guidance: float,
+    batch_size: int,
+) -> tuple[dict[str, float], dict[str, float]]:
+    """Quality scores of `n` samples against `ref`, and the seconds each stage
+    took."""
+    start = time.perf_counter()
+    generated = sample_batched(
+        samplers, params, key, n, batch_size, steps, labels, guidance
+    )
+    sampled = time.perf_counter()
+    feats = inception_features(inception, generated, batch_size)
+    featurized = time.perf_counter()
+    scores = quality_scores(feats, ref)
+    timings = {
+        "sampling": sampled - start,
+        "inception": featurized - sampled,
+        "scores": time.perf_counter() - featurized,
+    }
+    return scores, timings
+
+
+def format_timings(timings: dict[str, float]) -> str:
+    return ", ".join(f"{k} {format_duration(v)}" for k, v in timings.items())
+
+
 def make_sample_quality_fn(
     samplers,
     inception: fidjax.FID,
@@ -206,24 +256,13 @@ def make_sample_quality_fn(
     matches. The noise is the same every epoch.
     """
     ref = Reference(inception_features(inception, real_images, batch_size))
-    n = len(real_images)
 
     def quality_fn(epoch, train_state):
-        start = time.perf_counter()
-        generated = sample_batched(
-            samplers, train_state.ema_params, key, n, batch_size, steps,
-            real_labels, guidance,
+        scores, timings = score_samples(
+            samplers, train_state.ema_params, inception, ref, key,
+            len(real_images), real_labels, steps, guidance, batch_size,
         )
-        sampled = time.perf_counter()
-        feats = inception_features(inception, generated, batch_size)
-        featurized = time.perf_counter()
-        scores = quality_scores(feats, ref)
-        print(
-            f"[EPOCH {epoch}] {format_scores(scores)} | "
-            f"sampling {format_duration(sampled - start)}, "
-            f"inception {format_duration(featurized - sampled)}, "
-            f"scores {format_duration(time.perf_counter() - featurized)}"
-        )
+        print(f"[EPOCH {epoch}] {format_scores(scores)} | {format_timings(timings)}")
         return scores
 
     return quality_fn

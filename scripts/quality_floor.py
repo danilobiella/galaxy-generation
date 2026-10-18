@@ -16,10 +16,10 @@ import numpy as np
 
 from src.config import (BATCH_SIZE, DATA_PATH, FID_SAMPLES, IMAGE_SIZE,
                         QUALITY_FLOOR_PATH, SPLIT_SEED, VAL_FRACTION)
-from src.data_loader import make_data_splits, read_labels, stratified_split
-from src.generate import to_uint8
+from src.data_loader import make_data_splits
 from src.metrics import (Reference, format_scores, inception_features,
-                         load_images, load_inception, quality_scores)
+                         load_images, load_inception, quality_reference,
+                         quality_scores)
 
 
 def class_matched(train_idx, train_labels, ref_labels, rng) -> np.ndarray:
@@ -40,7 +40,7 @@ def main() -> None:
         DATA_PATH, BATCH_SIZE, val_fraction=VAL_FRACTION, split_seed=SPLIT_SEED,
         image_size=IMAGE_SIZE,
     )
-    val_images, val_labels = (np.concatenate(a)[:FID_SAMPLES] for a in zip(*splits.val))
+    val_images, val_labels = quality_reference(splits, FID_SAMPLES)
     key = {
         "val_split_hash": splits.val_hash,
         "image_size": list(IMAGE_SIZE),
@@ -55,14 +55,13 @@ def main() -> None:
             print(f"  {format_scores(saved)}")
             return
 
-    labels = read_labels(DATA_PATH)
-    train_idx, _ = stratified_split(labels, VAL_FRACTION, SPLIT_SEED)
     floor_idx = class_matched(
-        train_idx, labels[train_idx], val_labels, np.random.default_rng(args.seed)
+        splits.train_idx, splits.train_labels, val_labels,
+        np.random.default_rng(args.seed),
     )
 
     inception = load_inception()
-    ref = Reference(inception_features(inception, to_uint8(val_images)))
+    ref = Reference(inception_features(inception, val_images))
     feats = inception_features(inception, load_images(DATA_PATH, floor_idx, IMAGE_SIZE))
     scores = quality_scores(feats, ref)
 

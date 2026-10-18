@@ -28,8 +28,8 @@ from src.models import build_network  # This now needs to return a U-Net
 from src.plot import (epochs_table, plot_gradients, plot_loss,
                       plot_sample_quality)
 from src.diffusion import DiffusionSchedule, make_samplers
-from src.generate import to_uint8
-from src.metrics import load_floor, load_inception, make_sample_quality_fn
+from src.metrics import (eval_keys, load_floor, load_inception,
+                         make_sample_quality_fn, quality_reference)
 from src.logs import format_duration
 from src.train import fit_model, make_eval_fn, make_model_fns, make_train_fns
 from src.weights import save_params
@@ -182,7 +182,7 @@ if resumed is not None:
 
 # %% -- train --------------------------------------------------------------
 
-mse_key, fid_key = jax.random.split(jax.random.PRNGKey(SPLIT_SEED))
+mse_key, fid_key = eval_keys(SPLIT_SEED)
 
 mse_fn = make_eval_fn(
     unet=unet,
@@ -196,11 +196,11 @@ mse_fn = make_eval_fn(
 
 print("Loading Inception and featurizing the validation images...")
 phase_start = time.perf_counter()
-val_images, val_labels = (np.concatenate(a)[:FID_SAMPLES] for a in zip(*splits.val))
+val_images, val_labels = quality_reference(splits, FID_SAMPLES)
 quality_fn = make_sample_quality_fn(
     samplers=samplers,
     inception=load_inception(),
-    real_images=to_uint8(val_images),
+    real_images=val_images,
     real_labels=None if NUM_CLASSES is None else val_labels,
     key=fid_key,
     steps=FID_STEPS,
