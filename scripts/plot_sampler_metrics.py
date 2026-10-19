@@ -16,7 +16,7 @@ from matplotlib.lines import Line2D
 from src.metrics import load_floor
 
 SERIES = ("darkorange", "forestgreen")
-INK = "#57606a"
+INK = "#8b949e"
 FLOOR_COLOR = "#8a8a8a"
 LABEL_MERGE = 0.015
 
@@ -36,7 +36,8 @@ STYLE = {
     "ytick.major.size": 3,
     "xtick.labelsize": 9.5,
     "ytick.labelsize": 9.5,
-    "grid.color": "#d8dee4",
+    "grid.color": INK,
+    "grid.alpha": 0.3,
     "grid.linewidth": 0.6,
     "legend.fontsize": 9.5,
 }
@@ -129,7 +130,7 @@ def main() -> None:
     figure.legend(handles=handles, loc="outside lower center", ncol=len(handles), frameon=False,
                   labelcolor=INK)
     out = args.sweep.with_suffix(".png") if args.out is None else args.out
-    figure.savefig(out, dpi=150, bbox_inches="tight", facecolor="white")
+    figure.savefig(out, dpi=150, bbox_inches="tight", transparent=True)
     plt.close(figure)
     print(out)
 

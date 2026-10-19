@@ -29,21 +29,25 @@ from src.logs import format_duration
 DEFAULT_SCALES = (0.0, 1.0, 1.5, 2.0, 3.0, 5.0)
 UPSCALE = 2
 GAP = 4
-LABEL_WIDTH = 14
+LABEL_WIDTH = 13
+INK = "#8b949e"
+SAVE_SCALE = 2
 
 
 def mosaic(cells: np.ndarray) -> np.ndarray:
-    """(rows, cols, H, W, 3) uint8 cells as one white-gapped image, each cell
-    upscaled by repetition so it stays sharp when the page shrinks it."""
+    """(rows, cols, H, W, 3) uint8 cells as one RGBA image with transparent
+    gaps, each cell upscaled by repetition so it stays sharp when the page
+    shrinks it."""
     cells = cells.repeat(UPSCALE, axis=2).repeat(UPSCALE, axis=3)
     n_rows, n_cols, height, width, _ = cells.shape
-    image = np.full(
-        (n_rows * (height + GAP) - GAP, n_cols * (width + GAP) - GAP, 3), 255, np.uint8
+    image = np.zeros(
+        (n_rows * (height + GAP) - GAP, n_cols * (width + GAP) - GAP, 4), np.uint8
     )
     for row in range(n_rows):
         for col in range(n_cols):
             top, left = row * (height + GAP), col * (width + GAP)
-            image[top:top + height, left:left + width] = cells[row, col]
+            image[top:top + height, left:left + width, :3] = cells[row, col]
+            image[top:top + height, left:left + width, 3] = 255
     return image
 
 
@@ -54,7 +58,7 @@ def plot_transposed(grid, classes, per_class, scales, path) -> None:
     image = mosaic(cells)
 
     dpi = 100
-    header = 50
+    header = 58
     margin = 70 if n_scales > 1 else 0
     figure = plt.figure(figsize=((image.shape[1] + margin) / dpi, (image.shape[0] + header) / dpi), dpi=dpi)
     axis = figure.add_axes((
@@ -68,16 +72,16 @@ def plot_transposed(grid, classes, per_class, scales, path) -> None:
     for col, class_id in enumerate(classes):
         axis.text(
             col * cell + (cell - GAP) / 2, -10, textwrap.fill(CLASS_NAMES[class_id], LABEL_WIDTH),
-            ha="center", va="bottom", fontsize=11, color="#3d3c3a",
+            ha="center", va="bottom", fontsize=12, color=INK,
         )
     if n_scales > 1:
         for row in range(per_class * n_scales):
             axis.text(
                 -10, row * cell + (cell - GAP) / 2, f"w = {scales[row % n_scales]:g}",
-                ha="right", va="center", fontsize=11, color="#3d3c3a",
+                ha="right", va="center", fontsize=12, color=INK,
             )
 
-    figure.savefig(path, dpi=dpi, facecolor="white")
+    figure.savefig(path, dpi=dpi * SAVE_SCALE, transparent=True)
     plt.close(figure)
 
 
@@ -141,14 +145,14 @@ def main() -> None:
             axis.set_xticks([])
             axis.set_yticks([])
             if row == 0:
-                axis.set_title(f"w = {scale:g}", fontsize=9)
+                axis.set_title(f"w = {scale:g}", fontsize=9, color=INK)
             if column == 0 and row % args.per_class == 0:
-                axis.set_ylabel(CLASS_NAMES[class_id], fontsize=7, rotation=0, ha="right", va="center")
+                axis.set_ylabel(CLASS_NAMES[class_id], fontsize=7, rotation=0, ha="right", va="center", color=INK)
 
-    figure.suptitle("Classifier-free guidance sweep", fontsize=12)
+    figure.suptitle("Classifier-free guidance sweep", fontsize=12, color=INK)
     figure.tight_layout(rect=(0, 0, 1, 0.97))
 
-    figure.savefig(path, dpi=130, bbox_inches="tight")
+    figure.savefig(path, dpi=130, bbox_inches="tight", transparent=True)
     plt.close(figure)
     print(f"\n  {path}")
 
