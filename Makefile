@@ -16,7 +16,7 @@ HF_SPACE := galaxy-generation
 
 .PHONY: data quality-floor kaggle-dataset-stage kaggle-dataset-push kaggle-dataset-clean \
         kaggle-stage kaggle-push kaggle-clean test smoke api api-cpu \
-        docker-build docker-run hf-check hf-deploy
+        docker-build docker-run
 
 data: $(BIN_DATA_FILES)
 	@echo "$(GREEN)Data preparation complete!$(RESET)"
@@ -76,7 +76,7 @@ quality-floor: $(QUALITY_FLOOR_FILE)
 
 $(QUALITY_FLOOR_FILE): scripts/quality_floor.py src/config.py src/data_loader.py src/metrics.py src/fidjax.py | $(BIN_DATA_FILES)
 	@echo "$(GREEN)Computing the real-vs-real quality floor...$(RESET)"
-	XLA_FLAGS=--xla_gpu_autotune_level=0 python -m scripts.quality_floor --force
+	python -m scripts.quality_floor --force
 
 # Serve the model
 api:
