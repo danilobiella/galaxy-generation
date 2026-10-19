@@ -3,7 +3,13 @@ name: tests
 on:
   push:
     branches: [main]
+    paths-ignore: ["**.md", "assets/**"]
   pull_request:
+    paths-ignore: ["**.md", "assets/**"]
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
