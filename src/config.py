@@ -31,6 +31,13 @@ TRAIN_WEIGHTS_PATH = RUNS_DIR / "galaxy_unet.safetensors"
 CKPT_DIR = RUNS_DIR / "ckpt"
 
 WEIGHTS_PATH = CHECKPOINTS_DIR / "galaxy_unet_ema.safetensors"
+WEIGHTS_URL = (
+    "https://huggingface.co/danilobiella/galaxy-generation/resolve/main/"
+    "galaxy_unet_ema.safetensors"
+)
+WEIGHTS_SHA256 = (
+    "f9384f919b4da2539483f0b19957d818bf3e50d4d29513ca7cc578e372ec654b"
+)
 INCEPTION_WEIGHTS_PATH = CHECKPOINTS_DIR / "inception_v3_weights_fid.pickle"
 INCEPTION_WEIGHTS_URL = (
     "https://www.dropbox.com/s/xt6zvlvt22dcwck/inception_v3_weights_fid.pickle?dl=1"

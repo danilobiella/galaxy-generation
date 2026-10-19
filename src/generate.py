@@ -16,6 +16,8 @@ from src.config import (
     SAMPLER,
     TIMESTEPS,
     WEIGHTS_PATH,
+    WEIGHTS_SHA256,
+    WEIGHTS_URL,
 )
 from src.diffusion import (
     SAMPLERS,
@@ -24,6 +26,7 @@ from src.diffusion import (
     ddim_timesteps,
     make_samplers,
 )
+from src.download import download
 from src.models import build_network, is_conditional
 from src.weights import load_params
 
@@ -130,10 +133,12 @@ class Generator:
     ) -> "Generator":
         path = Path(path)
         if not path.exists():
-            raise FileNotFoundError(
-                f"No weights at {path}. Train a model first, or point at a "
-                "downloaded galaxy_unet_ema.safetensors."
-            )
+            if path.resolve() != WEIGHTS_PATH.resolve():
+                raise FileNotFoundError(
+                    f"No weights at {path}. Train a model first, or leave the "
+                    f"path at {WEIGHTS_PATH} to download the published weights."
+                )
+            download(WEIGHTS_URL, path, WEIGHTS_SHA256)
 
         params = load_params(path)
         if num_classes is None and is_conditional(params):

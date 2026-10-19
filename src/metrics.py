@@ -7,10 +7,8 @@ matrix square root.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import time
-import urllib.request
 from functools import cached_property
 
 import jax
@@ -22,6 +20,7 @@ from src import fidjax
 from src.config import (INCEPTION_WEIGHTS_PATH, INCEPTION_WEIGHTS_SHA256,
                         INCEPTION_WEIGHTS_URL, QUALITY_FLOOR_PATH)
 from src.data_loader import DataSplits, GalaxyLMDBDataSource, resize_image
+from src.download import download, sha256_of
 from src.generate import sample_batched, to_uint8
 from src.logs import format_duration
 
@@ -42,12 +41,9 @@ def load_inception() -> fidjax.FID:
     code, so the file has to match the pinned hash before it is opened."""
     path = INCEPTION_WEIGHTS_PATH
     if not path.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        print(f"Downloading Inception weights to {path}...")
-        urllib.request.urlretrieve(INCEPTION_WEIGHTS_URL, path)
+        download(INCEPTION_WEIGHTS_URL, path, INCEPTION_WEIGHTS_SHA256)
 
-    with open(path, "rb") as f:
-        digest = hashlib.file_digest(f, "sha256").hexdigest()
+    digest = sha256_of(path)
     if digest != INCEPTION_WEIGHTS_SHA256:
         raise ValueError(
             f"{path} has sha256 {digest}, expected {INCEPTION_WEIGHTS_SHA256}. "
