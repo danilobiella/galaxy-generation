@@ -30,7 +30,7 @@ GRADIENT_PLOT_PATH = RUNS_DIR / "gradient_plot.png"
 TRAIN_WEIGHTS_PATH = RUNS_DIR / "galaxy_unet.safetensors"
 CKPT_DIR = RUNS_DIR / "ckpt"
 
-WEIGHTS_PATH = CHECKPOINTS_DIR / "galaxy_unet.safetensors"
+WEIGHTS_PATH = CHECKPOINTS_DIR / "galaxy_unet_ema.safetensors"
 INCEPTION_WEIGHTS_PATH = CHECKPOINTS_DIR / "inception_v3_weights_fid.pickle"
 INCEPTION_WEIGHTS_URL = (
     "https://www.dropbox.com/s/xt6zvlvt22dcwck/inception_v3_weights_fid.pickle?dl=1"

@@ -132,7 +132,7 @@ class Generator:
         if not path.exists():
             raise FileNotFoundError(
                 f"No weights at {path}. Train a model first, or point at a "
-                "downloaded galaxy_unet.safetensors."
+                "downloaded galaxy_unet_ema.safetensors."
             )
 
         params = load_params(path)

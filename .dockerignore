@@ -18,7 +18,7 @@ __pycache__
 runs/*
 study/*
 model_checkpoints/*
-!model_checkpoints/galaxy_unet.safetensors
+!model_checkpoints/galaxy_unet_ema.safetensors
 
 src/train.py
 src/plot.py

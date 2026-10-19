@@ -16,7 +16,7 @@ COPY --chown=user requirements-inference.txt .
 RUN pip install --no-cache-dir --user -r requirements-inference.txt
 
 COPY --chown=user src/ /app/src/
-COPY --chown=user model_checkpoints/galaxy_unet.safetensors /app/model_checkpoints/galaxy_unet.safetensors
+COPY --chown=user model_checkpoints/galaxy_unet_ema.safetensors /app/model_checkpoints/galaxy_unet_ema.safetensors
 
 EXPOSE 7860
 
