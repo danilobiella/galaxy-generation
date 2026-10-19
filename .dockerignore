@@ -6,7 +6,6 @@ data
 notebooks
 scripts
 main.py
-generate_with_video.py
 .kaggle_push
 .kaggle_dataset
 __pycache__
