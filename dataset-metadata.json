@@ -1,9 +1,9 @@
 {
   "title": "galaxy10_DECals", 
   "subtitle": "galaxy10-DECals-dataset",
-  "description": "The galaxy10_DECals dataset is a collection of images of galaxies, categorized into 10 different classes based on their morphological features. This dataset is derived from the DECaLS survey and is used for training and evaluating machine learning models in the field of astronomy.",
+  "description": "The galaxy10_DECals dataset is a collection of images of galaxies, categorized into 10 different classes based on their morphological features. This dataset is derived from the DECaLS survey and is used for training and evaluating machine learning models in the field of astronomy. Re-packaged as LMDB from Galaxy10 DECaLS by Henry W. Leung and Jo Bovy (doi:10.5281/zenodo.10845026), licensed CC BY 4.0. Labels from Galaxy Zoo volunteers; images from the DESI Legacy Imaging Surveys.",
   "id": "danilob/galaxy10-DECaLS",
-  "licenses": [{"name": "CC0-1.0"}],
+  "licenses": [{"name": "CC-BY-4.0"}],
   "keywords": [
     "astronomy",
 	"galaxies",
