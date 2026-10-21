@@ -83,7 +83,6 @@ class AttentionBlock(hk.Module):
         # Flatten spatial dimensions
         x_flat = jnp.reshape(x, (B, H * W, C))
 
-        # We use Haiku's built-in MultiHeadAttention
         attn = hk.MultiHeadAttention(
             num_heads=self.num_heads,
             key_size=self.dim // self.num_heads,
@@ -148,7 +147,6 @@ class UNet(hk.Module):
             x = ResnetBlock(current_dim)(x, t_emb)
             skips.append(x)
 
-            # Key fix: Do NOT push the downsampled output to skips.
             if i != len(dims) - 1:
                 x = Downsample(current_dim)(x)
 

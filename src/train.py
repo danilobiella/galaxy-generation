@@ -157,7 +157,7 @@ def make_train_fns(
                 dropped = jax.random.uniform(drop_key, (batch_size,)) < p_uncond
                 y = jnp.where(dropped, num_classes, labels.astype(jnp.int32))
 
-            # 4. Simple MSE Loss
+            # 4. MSE on the noise
             return jnp.mean(
                 noise_prediction_error(unet, schedule, params, real_imgs, t, epsilon, y)
             )
@@ -251,7 +251,7 @@ def train_epoch(
                 "steps_per_epoch does not match the data being passed in."
             ) from None
         data_wait += time.perf_counter() - wait_start
-        # Extract images from tuple if your dataloader returns (images, labels)
+        # (images, labels) or images only
         if isinstance(batch, tuple):
             real_imgs, labels = batch[0], batch[1]
         else:

@@ -24,7 +24,7 @@ from src.config import (BATCH_SIZE, CHECKPOINT_EVERY, CKPT_DIR, DATA_PATH,
                         VAL_FRACTION, WARMUP_STEPS)
 from src import checkpoint
 from src.data_loader import close_envs, make_data_splits
-from src.models import build_network  # This now needs to return a U-Net
+from src.models import build_network
 from src.plot import (epochs_table, plot_gradients, plot_loss,
                       plot_sample_quality)
 from src.diffusion import DiffusionSchedule, make_samplers
@@ -77,7 +77,6 @@ unet = build_network(
 )
 print(f"Built U-Net network (num_classes={NUM_CLASSES})")
 
-# The U-Net takes (images, timesteps)
 dummy_images = jnp.zeros((BATCH_SIZE, *IMAGE_SIZE, 3))
 dummy_timesteps = jnp.zeros((BATCH_SIZE,), dtype=jnp.int32)
 dummy_labels = None if NUM_CLASSES is None else jnp.zeros(
@@ -115,7 +114,6 @@ print(
 
 # %% -- initialize state ---------------------------------------------------
 
-# Initialize the diffusion noise schedule
 diffusion_schedule = DiffusionSchedule.create(T=TIMESTEPS)
 
 samplers = make_samplers(
