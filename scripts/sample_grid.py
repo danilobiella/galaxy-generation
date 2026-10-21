@@ -6,11 +6,15 @@ noise) and columns are guidance scales. Every cell in a row shares the same
 initial noise, so differences along a row come from guidance alone.
 --transpose puts the classes on columns and the samples (times scales) on rows,
 drawn as one gap-separated mosaic.
+--mirror LEFT RIGHT puts w = 0 in the middle and increases w outwards, towards
+class LEFT on the left and class RIGHT on the right. At w = 0 the label is
+ignored, so both halves share the middle column.
 
 Usage:
     python -m scripts.sample_grid                                        # classes x guidance
     python -m scripts.sample_grid --classes 8 --per-class 16 --scales 0 1 4 16
     python -m scripts.sample_grid --scales 1 --per-class 6 --steps 50 --transpose -o assets/class_showcase.png
+    python -m scripts.sample_grid --mirror 8 1 --per-class 8 --scales 0 1 2 4 8 --steps 50
 """
 
 import argparse
@@ -85,6 +89,30 @@ def plot_transposed(grid, classes, per_class, scales, path) -> None:
     plt.close(figure)
 
 
+def plot_mirrored(left_grid, right_grid, left, right, scales, path) -> None:
+    cells = np.concatenate([left_grid[:, :0:-1], right_grid], axis=1)
+    labels = [f"{w:g}" for w in scales[:0:-1]] + [f"w = {scales[0]:g}"] + [f"{w:g}" for w in scales[1:]]
+    image = mosaic(cells)
+
+    dpi = 100
+    header = 70
+    figure = plt.figure(figsize=(image.shape[1] / dpi, (image.shape[0] + header) / dpi), dpi=dpi)
+    axis = figure.add_axes((0, 0, 1, image.shape[0] / (image.shape[0] + header)))
+    axis.imshow(image, interpolation="nearest")
+    axis.set_axis_off()
+
+    cell = IMAGE_SIZE[1] * UPSCALE + GAP
+    for col, label in enumerate(labels):
+        axis.text(col * cell + (cell - GAP) / 2, -8, label, ha="center", va="bottom", fontsize=13, color=INK)
+    half = len(scales) - 1
+    axis.text(half * cell / 2, -36, f"← {CLASS_NAMES[left]}", ha="center", va="bottom", fontsize=14, color=INK)
+    axis.text((half + 1 + half / 2) * cell, -36, f"{CLASS_NAMES[right]} →", ha="center", va="bottom",
+              fontsize=14, color=INK)
+
+    figure.savefig(path, dpi=dpi * SAVE_SCALE, transparent=True)
+    plt.close(figure)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--scales", type=float, nargs="+", default=list(DEFAULT_SCALES))
@@ -94,12 +122,17 @@ def main() -> None:
     parser.add_argument("--steps", type=int, default=FID_STEPS)
     parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--transpose", action="store_true")
+    parser.add_argument("--mirror", type=int, nargs=2, metavar=("LEFT", "RIGHT"), default=None)
     parser.add_argument("--weights", type=Path, default=WEIGHTS_PATH)
     parser.add_argument("-o", "--out", type=Path, default=None)
     args = parser.parse_args()
 
     seed = random_seed() if args.seed is None else args.seed
     classes = list(range(NUM_CLASSES)) if args.classes is None else args.classes
+    if args.mirror is not None:
+        classes = list(args.mirror)
+        if sorted(args.scales) != args.scales or args.scales[0] != 0:
+            raise SystemExit("--mirror needs ascending --scales starting at 0")
     rows = [c for c in classes for _ in range(args.per_class)]
 
     print(f"Loading {args.weights} ...")
@@ -117,19 +150,28 @@ def main() -> None:
 
     start = time.perf_counter()
     grid = np.empty((n_rows, n_cols, *IMAGE_SIZE, 3), dtype=np.uint8)
+    block = args.per_class if args.mirror is not None else n_rows
     for column, scale in enumerate(args.scales):
-        grid[:, column] = generator.generate_batched(
-            n_samples=n_rows,
-            batch_size=args.batch_size,
-            seed=seed,
-            steps=args.steps,
-            labels=rows,
-            guidance=scale,
-        )
+        for first in range(0, n_rows, block):
+            grid[first:first + block, column] = generator.generate_batched(
+                n_samples=block,
+                batch_size=args.batch_size,
+                seed=seed,
+                steps=args.steps,
+                labels=rows[first:first + block],
+                guidance=scale,
+            )
     print(f"  done in {format_duration(time.perf_counter() - start)}")
 
     path = RESULTS_DIR / f"sample_grid_{seed}.png" if args.out is None else args.out
     path.parent.mkdir(parents=True, exist_ok=True)
+    if args.mirror is not None:
+        left_grid, right_grid = grid[:args.per_class], grid[args.per_class:]
+        diff = np.abs(left_grid[:, 0].astype(int) - right_grid[:, 0].astype(int)).max()
+        print(f"  w = 0 columns differ by at most {diff} grey levels")
+        plot_mirrored(left_grid, right_grid, *classes, args.scales, path)
+        print(f"\n  {path}")
+        return
     if args.transpose:
         plot_transposed(grid, classes, args.per_class, args.scales, path)
         print(f"\n  {path}")
@@ -145,11 +187,12 @@ def main() -> None:
             axis.set_xticks([])
             axis.set_yticks([])
             if row == 0:
-                axis.set_title(f"w = {scale:g}", fontsize=9, color=INK)
-            if column == 0 and row % args.per_class == 0:
+                axis.set_title(f"w = {scale:g}", fontsize=14, color=INK)
+            if len(classes) > 1 and column == 0 and row % args.per_class == 0:
                 axis.set_ylabel(CLASS_NAMES[class_id], fontsize=7, rotation=0, ha="right", va="center", color=INK)
 
-    figure.suptitle("Classifier-free guidance sweep", fontsize=12, color=INK)
+    title = CLASS_NAMES[classes[0]] if len(classes) == 1 else "Classifier-free guidance sweep"
+    figure.suptitle(title, fontsize=16, color=INK)
     figure.tight_layout(rect=(0, 0, 1, 0.97))
 
     figure.savefig(path, dpi=130, bbox_inches="tight", transparent=True)

@@ -21,11 +21,11 @@ FLOOR_COLOR = "#8a8a8a"
 LABEL_MERGE = 0.015
 
 STYLE = {
-    "font.size": 10,
+    "font.size": 11.5,
     "axes.edgecolor": INK,
     "axes.linewidth": 0.8,
     "axes.labelcolor": INK,
-    "axes.labelsize": 10.5,
+    "axes.labelsize": 12,
     "xtick.color": INK,
     "ytick.color": INK,
     "xtick.direction": "in",
@@ -34,12 +34,12 @@ STYLE = {
     "ytick.right": True,
     "xtick.major.size": 3,
     "ytick.major.size": 3,
-    "xtick.labelsize": 9.5,
-    "ytick.labelsize": 9.5,
+    "xtick.labelsize": 11,
+    "ytick.labelsize": 11,
     "grid.color": INK,
     "grid.alpha": 0.3,
     "grid.linewidth": 0.6,
-    "legend.fontsize": 9.5,
+    "legend.fontsize": 11,
 }
 
 
@@ -58,8 +58,9 @@ def main() -> None:
     plt.rcParams.update(STYLE)
     figure, axes = plt.subplot_mosaic(
         [["kid", "manifold"], ["fid", "manifold"]],
-        figsize=(9, 5.4), layout="constrained", gridspec_kw={"width_ratios": (1, 1.1)},
+        figsize=(9, 5.4), layout="constrained", gridspec_kw={"width_ratios": (1, 1.37)},
     )
+    figure.get_layout_engine().set(wspace=0.04)
     kid_ax, fid_ax, manifold_ax = axes["kid"], axes["fid"], axes["manifold"]
     fid_ax.sharex(kid_ax)
     handles = []
@@ -93,7 +94,7 @@ def main() -> None:
             manifold_ax.annotate(
                 "w=" + ", ".join(f"{w:g}" for w, _, _ in group), (x, y),
                 textcoords="offset points", xytext=(7, -3) if right else (-7, 3),
-                ha="left" if right else "right", fontsize=8.5, color=INK,
+                ha="left" if right else "right", fontsize=10, color=INK,
             )
 
     if floor is not None:
@@ -102,7 +103,7 @@ def main() -> None:
             ax.annotate(
                 "real vs real", (1, value), xycoords=("axes fraction", "data"),
                 textcoords="offset points", xytext=(-4, 2), ha="right", va="bottom",
-                fontsize=8.5, color=INK,
+                fontsize=10, color=INK,
             )
         manifold_ax.plot(floor["coverage"], floor["density"], marker="*", markersize=12,
                          color=FLOOR_COLOR, linestyle="none")
@@ -115,7 +116,7 @@ def main() -> None:
     anchor = low + 0.66 * (high - low)
     manifold_ax.annotate(
         "density = coverage", (anchor, anchor), textcoords="offset points", xytext=(-2, 2),
-        va="bottom", fontsize=8.5, color=INK, rotation=45, rotation_mode="anchor",
+        va="bottom", fontsize=10, color=INK, rotation=45, rotation_mode="anchor",
     )
     manifold_ax.set(xlim=(low, high), ylim=(low, high), aspect="equal")
 
@@ -123,6 +124,9 @@ def main() -> None:
     kid_ax.tick_params(labelbottom=False)
     fid_ax.set(xlabel="guidance scale w", ylabel="FID")
     manifold_ax.set(xlabel="coverage (diversity)", ylabel="density (fidelity)")
+    manifold_ax.yaxis.set_label_position("right")
+    manifold_ax.yaxis.label.set(rotation=270, va="bottom")
+    manifold_ax.tick_params(labelleft=False, labelright=True)
     for ax in (kid_ax, fid_ax, manifold_ax):
         ax.grid(True)
         ax.set_axisbelow(True)
