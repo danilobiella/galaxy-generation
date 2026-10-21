@@ -15,6 +15,7 @@ import numpy as np
 from PIL import Image
 
 METRICS = ("l2", "corr")
+INK = "#8b949e"
 
 
 def load_dataset(
@@ -242,29 +243,46 @@ def plot_distance_histogram(
     """Generated vs real top-1 distances. Overlap means no memorisation."""
     import matplotlib.pyplot as plt
 
-    figure, axis = plt.subplots(figsize=(7, 4))
+    plt.rcParams.update({
+        "font.size": 11.5,
+        "axes.edgecolor": INK,
+        "axes.labelcolor": INK,
+        "xtick.color": INK,
+        "ytick.color": INK,
+        "xtick.direction": "in",
+        "ytick.direction": "in",
+        "grid.color": INK,
+        "grid.alpha": 0.3,
+        "grid.linewidth": 0.6,
+    })
+    figure, axis = plt.subplots(figsize=(7, 3.6), layout="constrained")
 
     lowest = min(generated[:, 0].min(), baseline[:, 0].min())
     highest = max(generated[:, 0].max(), baseline[:, 0].max())
-    bins = np.linspace(lowest, highest, 60)
+    bins = np.linspace(lowest, highest, 50)
 
     axis.hist(
-        baseline[:, 0], bins=bins, alpha=0.6, density=True, label="real → train set"
+        baseline[:, 0], bins=bins, density=True, color="#8a8a8a", alpha=0.55,
+        label="validation images",
     )
     axis.hist(
-        generated[:, 0], bins=bins, alpha=0.6, density=True, label="generated → train set"
+        generated[:, 0], bins=bins, density=True, histtype="step", linewidth=1.8,
+        color="darkorange", label="generated samples",
     )
 
     if threshold is not None:
-        axis.axvline(
-            threshold, color="crimson", linestyle="--", linewidth=1, label="baseline p01"
+        axis.axvline(threshold, color=INK, linestyle="--", linewidth=1.1)
+        axis.annotate(
+            "closest 1% of\nvalidation images", (threshold, 1), xycoords=("data", "axes fraction"),
+            textcoords="offset points", xytext=(-5, -5), ha="right", va="top",
+            fontsize=10, color=INK,
         )
 
-    axis.set_xlabel(f"nearest-neighbour distance ({metric})")
+    axis.set_xlabel(f"distance to the closest training image ({metric})")
     axis.set_ylabel("density")
-    axis.set_title("Distance to the closest training image")
-    axis.legend()
+    axis.grid(True)
+    axis.set_axisbelow(True)
+    axis.legend(frameon=False, labelcolor=INK)
 
-    figure.tight_layout()
-    figure.savefig(path, dpi=130)
+    figure.savefig(path, dpi=300, bbox_inches="tight", transparent=True)
     plt.close(figure)

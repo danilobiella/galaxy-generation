@@ -57,17 +57,19 @@ def main() -> None:
     print(f"Loading {len(splits.train_idx)} training images ...")
     start = time.time()
     refs = to_float(load_images(DATA_PATH, splits.train_idx, IMAGE_SIZE))
-    holdout = to_float(quality_reference(splits)[0])
+    holdout, holdout_labels = quality_reference(splits)
+    holdout = to_float(holdout)
     print(f"  done in {time.time() - start:.1f}s; {len(holdout)} validation images as baseline")
 
     generator = Generator.from_weights(
         args.weights, image_size=IMAGE_SIZE, timesteps=TIMESTEPS
     )
+    labels = np.random.default_rng(seed).choice(holdout_labels, args.n_samples, replace=False)
     print(f"Sampling {args.n_samples} images ({args.steps} DDIM steps) ...")
     start = time.time()
     generated = to_float(
         generator.generate_batched(
-            args.n_samples, args.batch_size, seed=seed, steps=args.steps
+            args.n_samples, args.batch_size, seed=seed, steps=args.steps, labels=labels
         )
     )
     print(f"  done in {time.time() - start:.1f}s")
