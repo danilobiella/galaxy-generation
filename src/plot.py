@@ -73,7 +73,7 @@ def plot_loss(history: dict, filepath: str = "loss_plot.png"):
 
 
 def plot_sample_quality(
-    history: dict, filepath: str = "sample_quality_plot.png", floor: dict | None = None
+    history: dict, filepath: str = "sample_quality_plot.png", baseline: dict | None = None
 ):
     table = epochs_table(history).dropna(subset=["kid"])
     epochs = table.index
@@ -91,9 +91,9 @@ def plot_sample_quality(
     ax_fid.set_xlabel("epoch")
     ax_fid.xaxis.set_major_locator(MaxNLocator(integer=True))
 
-    if floor is not None:
-        label = f"real vs real (N = {floor['n']})"
-        for ax, value in ((ax_kid, floor["kid"] * 1e3), (ax_fid, floor["fid"])):
+    if baseline is not None:
+        label = f"real vs real (N = {baseline['n']})"
+        for ax, value in ((ax_kid, baseline["kid"] * 1e3), (ax_fid, baseline["fid"])):
             ax.axhline(value, color="#8a8a8a", linestyle="--", linewidth=1.5, label=label)
             ax.legend(loc="upper right")
 

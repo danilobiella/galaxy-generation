@@ -1,5 +1,5 @@
 """Plot a training run: denoising loss, KID and FID per epoch, with the
-real-vs-real floor in the quality panels.
+real-vs-real baseline in the quality panels.
 
 Usage:
     python -m scripts.plot_training_curves runs/good_run --out assets/training_curves.png
@@ -13,15 +13,15 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib.ticker import MultipleLocator
 
-from scripts.plot_sampler_metrics import FLOOR_COLOR, INK, STYLE
+from scripts.plot_sampler_metrics import BASELINE_COLOR, INK, STYLE
 from src.config import RUNS_DIR
-from src.metrics import load_floor
+from src.metrics import load_baseline
 
 COLOR = "darkorange"
 
 
-def label_floor(ax, value: float) -> None:
-    ax.axhline(value, color=FLOOR_COLOR, linestyle="--", linewidth=1.1)
+def label_baseline(ax, value: float) -> None:
+    ax.axhline(value, color=BASELINE_COLOR, linestyle="--", linewidth=1.1)
     ax.annotate(
         "real vs real", (1, value), xycoords=("axes fraction", "data"),
         textcoords="offset points", xytext=(-4, 3), ha="right", va="bottom",
@@ -38,7 +38,7 @@ def main() -> None:
     with open(args.run_dir / "history.pkl", "rb") as f:
         table = pd.DataFrame(pickle.load(f)["epochs"]).set_index("epoch")
     scored = table.dropna(subset=["kid"])
-    floor = load_floor()
+    baseline = load_baseline()
 
     plt.rcParams.update(STYLE)
     figure, (loss_ax, kid_ax, fid_ax) = plt.subplots(
@@ -58,11 +58,11 @@ def main() -> None:
     kid_std = 1e3 * scored["kid_std"]
     kid_ax.fill_between(scored.index, kid - kid_std, kid + kid_std, color=COLOR, alpha=0.18, linewidth=0)
     kid_ax.plot(scored.index, kid, color=COLOR, marker="o", markersize=3.5, linewidth=1.8)
-    label_floor(kid_ax, 1e3 * floor["kid"])
+    label_baseline(kid_ax, 1e3 * baseline["kid"])
     kid_ax.set(yscale="log", ylabel="KID ×10⁻³")
 
     fid_ax.plot(scored.index, scored["fid"], color=COLOR, marker="o", markersize=3.5, linewidth=1.8)
-    label_floor(fid_ax, floor["fid"])
+    label_baseline(fid_ax, baseline["fid"])
     fid_ax.set(yscale="log", ylabel="FID")
 
     for ax in (loss_ax, kid_ax, fid_ax):

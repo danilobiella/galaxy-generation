@@ -28,7 +28,7 @@ from src.models import build_network  # This now needs to return a U-Net
 from src.plot import (epochs_table, plot_gradients, plot_loss,
                       plot_sample_quality)
 from src.diffusion import DiffusionSchedule, make_samplers
-from src.metrics import (eval_keys, load_floor, load_inception,
+from src.metrics import (eval_keys, load_baseline, load_inception,
                          make_sample_quality_fn, quality_reference)
 from src.logs import format_duration
 from src.train import fit_model, make_eval_fn, make_model_fns, make_train_fns
@@ -271,6 +271,6 @@ print(f"Saved EMA weights to: {EMA_WEIGHTS_PATH}")
 
 plot_loss(history, str(LOSS_PLOT_PATH))
 plot_sample_quality(
-    history, str(SAMPLE_QUALITY_PLOT_PATH), floor=load_floor(splits.val_hash)
+    history, str(SAMPLE_QUALITY_PLOT_PATH), baseline=load_baseline(splits.val_hash)
 )
 plot_gradients(history, str(GRADIENT_PLOT_PATH))

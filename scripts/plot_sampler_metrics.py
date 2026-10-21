@@ -1,6 +1,6 @@
 """Plot a sampler sweep: KID and FID against guidance, one line per step count,
 and density against coverage with each point labelled by its guidance scale.
-The real-vs-real floor is drawn in every panel.
+The real-vs-real baseline is drawn in every panel.
 
 Usage:
     python -m scripts.plot_sampler_metrics results/sampler_sweep_steps50.json
@@ -13,11 +13,11 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
-from src.metrics import load_floor
+from src.metrics import load_baseline
 
 SERIES = ("darkorange", "forestgreen")
 INK = "#8b949e"
-FLOOR_COLOR = "#8a8a8a"
+BASELINE_COLOR = "#8a8a8a"
 LABEL_MERGE = 0.015
 
 STYLE = {
@@ -50,7 +50,7 @@ def main() -> None:
     args = parser.parse_args()
 
     sweep = json.loads(args.sweep.read_text())
-    floor = load_floor(sweep["val_split_hash"])
+    baseline = load_baseline(sweep["val_split_hash"])
     by_steps: dict[int, list[dict]] = {}
     for row in sorted(sweep["rows"], key=lambda r: r["guidance"]):
         by_steps.setdefault(row["steps"], []).append(row)
@@ -97,22 +97,22 @@ def main() -> None:
                 ha="left" if right else "right", fontsize=10, color=INK,
             )
 
-    if floor is not None:
-        for ax, value in ((kid_ax, 1e3 * floor["kid"]), (fid_ax, floor["fid"])):
-            ax.axhline(value, color=FLOOR_COLOR, linestyle="--", linewidth=1.1)
+    if baseline is not None:
+        for ax, value in ((kid_ax, 1e3 * baseline["kid"]), (fid_ax, baseline["fid"])):
+            ax.axhline(value, color=BASELINE_COLOR, linestyle="--", linewidth=1.1)
             ax.annotate(
                 "real vs real", (1, value), xycoords=("axes fraction", "data"),
                 textcoords="offset points", xytext=(-4, 2), ha="right", va="bottom",
                 fontsize=10, color=INK,
             )
-        manifold_ax.plot(floor["coverage"], floor["density"], marker="*", markersize=12,
-                         color=FLOOR_COLOR, linestyle="none")
-        handles.append(Line2D([], [], marker="*", markersize=10, color=FLOOR_COLOR, linestyle="none",
-                              label=f"real vs real (N = {floor['n']:,})"))
+        manifold_ax.plot(baseline["coverage"], baseline["density"], marker="*", markersize=12,
+                         color=BASELINE_COLOR, linestyle="none")
+        handles.append(Line2D([], [], marker="*", markersize=10, color=BASELINE_COLOR, linestyle="none",
+                              label=f"real vs real (N = {baseline['n']:,})"))
 
     low = min(*manifold_ax.get_xlim(), *manifold_ax.get_ylim())
     high = max(*manifold_ax.get_xlim(), *manifold_ax.get_ylim())
-    manifold_ax.plot([low, high], [low, high], color=FLOOR_COLOR, linestyle=":", linewidth=1.1, zorder=0)
+    manifold_ax.plot([low, high], [low, high], color=BASELINE_COLOR, linestyle=":", linewidth=1.1, zorder=0)
     anchor = low + 0.66 * (high - low)
     manifold_ax.annotate(
         "density = coverage", (anchor, anchor), textcoords="offset points", xytext=(-2, 2),

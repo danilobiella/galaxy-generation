@@ -18,7 +18,7 @@ if SMOKE:
 CHECKPOINTS_DIR = Path("model_checkpoints")
 STUDY_DIR = Path("study")
 RESULTS_DIR = Path("results")
-QUALITY_FLOOR_PATH = RESULTS_DIR / "quality_floor.json"
+QUALITY_BASELINE_PATH = RESULTS_DIR / "quality_baseline.json"
 
 FIGURES_DIR = RUNS_DIR / "figures"
 STATE_PATH = RUNS_DIR / "state.pkl"

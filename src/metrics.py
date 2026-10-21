@@ -18,22 +18,22 @@ from scipy import linalg
 
 from src import fidjax
 from src.config import (INCEPTION_WEIGHTS_PATH, INCEPTION_WEIGHTS_SHA256,
-                        INCEPTION_WEIGHTS_URL, QUALITY_FLOOR_PATH)
+                        INCEPTION_WEIGHTS_URL, QUALITY_BASELINE_PATH)
 from src.data_loader import DataSplits, GalaxyLMDBDataSource, resize_image
 from src.download import download, sha256_of
 from src.generate import sample_batched, to_uint8
 from src.logs import format_duration
 
 
-def load_floor(val_hash: str | None = None) -> dict | None:
-    """The saved real-vs-real scores from `scripts.quality_floor`, or None if they
+def load_baseline(val_hash: str | None = None) -> dict | None:
+    """The saved real-vs-real scores from `scripts.quality_baseline`, or None if they
     are missing or were computed on a different validation split."""
-    if not QUALITY_FLOOR_PATH.exists():
+    if not QUALITY_BASELINE_PATH.exists():
         return None
-    floor = json.loads(QUALITY_FLOOR_PATH.read_text())
-    if val_hash is not None and floor["val_split_hash"] != val_hash:
+    baseline = json.loads(QUALITY_BASELINE_PATH.read_text())
+    if val_hash is not None and baseline["val_split_hash"] != val_hash:
         return None
-    return floor
+    return baseline
 
 
 def load_inception() -> fidjax.FID:

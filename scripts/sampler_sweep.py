@@ -2,9 +2,9 @@
 
 Scores against the same validation reference, labels, noise and KID seed as the
 per-epoch training scores, so guidance 2.0 at 20 steps on the final EMA weights
-reproduces the run's last KID/FID, and every row compares to the floor from
-`scripts.quality_floor`. With `-n` below the full reference, only KID stays
-comparable to the floor.
+reproduces the run's last KID/FID, and every row compares to the baseline from
+`scripts.quality_baseline`. With `-n` below the full reference, only KID stays
+comparable to the baseline.
 
 Usage:
     python -m scripts.sampler_sweep --weights runs/good_run/galaxy_unet_ema.safetensors
@@ -21,7 +21,7 @@ from src.data_loader import make_data_splits
 from src.generate import Generator
 from src.logs import green
 from src.metrics import (Reference, eval_keys, format_scores, format_timings,
-                         inception_features, load_floor, load_inception,
+                         inception_features, load_baseline, load_inception,
                          quality_reference, score_samples)
 
 
@@ -48,9 +48,9 @@ def main() -> None:
     inception = load_inception()
     ref = Reference(inception_features(inception, val_images, args.batch_size))
 
-    floor = load_floor(splits.val_hash)
-    if floor is not None:
-        print(f"Floor (real vs real, N = {floor['n']}): {format_scores(floor)}")
+    baseline = load_baseline(splits.val_hash)
+    if baseline is not None:
+        print(f"Baseline (real vs real, N = {baseline['n']}): {format_scores(baseline)}")
     print(f"{args.weights}, N = {n} against {len(val_images)} validation images\n")
 
     args.out.parent.mkdir(parents=True, exist_ok=True)

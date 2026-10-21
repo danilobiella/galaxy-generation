@@ -23,7 +23,7 @@ import numpy as np  # noqa: E402
 from PIL import Image  # noqa: E402
 
 from src.config import RUNS_DIR  # noqa: E402
-from src.metrics import load_floor  # noqa: E402
+from src.metrics import load_baseline  # noqa: E402
 from src.plot import (WINDOW, plot_gradients, plot_loss,  # noqa: E402
                       plot_sample_quality)
 
@@ -167,7 +167,7 @@ def main() -> None:
 
     if any("kid" in record for record in history["epochs"]):
         written.append(run_dir / "sample_quality_plot.png")
-        plot_sample_quality(history, str(written[-1]), floor=load_floor())
+        plot_sample_quality(history, str(written[-1]), baseline=load_baseline())
 
     sheet = run_dir / "samples_by_epoch.png"
     if sample_sheet(run_dir, sheet):

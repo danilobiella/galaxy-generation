@@ -1,4 +1,4 @@
-"""Real-vs-real floor for the per-epoch quality scores (KID, FID, density, coverage).
+"""Real-vs-real baseline for the per-epoch quality scores (KID, FID, density, coverage).
 
 The reference is the validation set exactly as training builds it. The other
 side is the same number of train-split images, drawn per class to match the
@@ -6,7 +6,7 @@ reference's labels, as the generated samples are. The result is saved and
 reused until the split, image size, N or seed changes.
 
 Usage:
-    python -m scripts.quality_floor
+    python -m scripts.quality_baseline
 """
 
 import argparse
@@ -15,7 +15,7 @@ import json
 import numpy as np
 
 from src.config import (BATCH_SIZE, DATA_PATH, FID_SAMPLES, IMAGE_SIZE,
-                        QUALITY_FLOOR_PATH, SPLIT_SEED, VAL_FRACTION)
+                        QUALITY_BASELINE_PATH, SPLIT_SEED, VAL_FRACTION)
 from src.data_loader import make_data_splits
 from src.metrics import (Reference, format_scores, inception_features,
                          load_images, load_inception, quality_reference,
@@ -48,27 +48,27 @@ def main() -> None:
         "seed": args.seed,
     }
 
-    if QUALITY_FLOOR_PATH.exists() and not args.force:
-        saved = json.loads(QUALITY_FLOOR_PATH.read_text())
+    if QUALITY_BASELINE_PATH.exists() and not args.force:
+        saved = json.loads(QUALITY_BASELINE_PATH.read_text())
         if {k: saved.get(k) for k in key} == key:
-            print(f"Cached in {QUALITY_FLOOR_PATH} (--force to recompute):")
+            print(f"Cached in {QUALITY_BASELINE_PATH} (--force to recompute):")
             print(f"  {format_scores(saved)}")
             return
 
-    floor_idx = class_matched(
+    baseline_idx = class_matched(
         splits.train_idx, splits.train_labels, val_labels,
         np.random.default_rng(args.seed),
     )
 
     inception = load_inception()
     ref = Reference(inception_features(inception, val_images))
-    feats = inception_features(inception, load_images(DATA_PATH, floor_idx, IMAGE_SIZE))
+    feats = inception_features(inception, load_images(DATA_PATH, baseline_idx, IMAGE_SIZE))
     scores = quality_scores(feats, ref)
 
-    QUALITY_FLOOR_PATH.parent.mkdir(parents=True, exist_ok=True)
-    QUALITY_FLOOR_PATH.write_text(json.dumps({**key, **scores}, indent=2) + "\n")
+    QUALITY_BASELINE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    QUALITY_BASELINE_PATH.write_text(json.dumps({**key, **scores}, indent=2) + "\n")
     print(f"Real train vs val, N = {key['n']}: {format_scores(scores)}")
-    print(f"Saved to {QUALITY_FLOOR_PATH}")
+    print(f"Saved to {QUALITY_BASELINE_PATH}")
 
 
 if __name__ == "__main__":
