@@ -160,7 +160,6 @@ def format_epoch_summary(
     if has("val_mse"):
         lines += row("val", f"mse  {r['val_mse']:.4f}", r.get("time_val"))
     if has("val_mse", "train_probe_mse"):
-        gap = r["val_mse"] - r["train_probe_mse"]
         lines += row(
             "probe", f"mse  {r['train_probe_mse']:.4f} ",
             r.get("time_probe"),

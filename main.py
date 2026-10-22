@@ -13,15 +13,16 @@ import optax  # type: ignore
 from src.config import (BATCH_SIZE, CHECKPOINT_EVERY, CKPT_DIR, DATA_PATH,
                         KAGGLE_STAGED_DATA_PATH,
                         DATA_SEED, DDIM_STEPS, EMA_DECAY, EPOCHS_TABLE_PATH,
-                        EVAL_TIMESTEPS,
+                        EVAL_BATCHES, EVAL_TIMESTEPS,
                         FID_BATCH_SIZE, FID_EVERY, FID_SAMPLES, FID_STEPS,
                         FIGURES_DIR, FINAL_LEARNING_RATE, GRADIENT_PLOT_PATH,
                         GUIDANCE_SCALE, HISTORY_PATH, IMAGE_SIZE,
                         KEEP_CHECKPOINTS, LEARNING_RATE, LOSS_PLOT_PATH,
                         MODEL_DIM, MODEL_DIM_MULTS, N_EPOCHS, NUM_CLASSES,
-                        ON_KAGGLE, P_UNCOND, RESUME, RUNS_DIR,
+                        ON_KAGGLE, P_UNCOND, PRINT_EVERY, RESUME, RUNS_DIR,
                         SAMPLE_QUALITY_PLOT_PATH, SEED,
-                        SPLIT_SEED, STATE_PATH, TIMESTEPS, TRAIN_WEIGHTS_PATH,
+                        SPLIT_SEED, STATE_PATH, STEPS_PER_EPOCH, TIMESTEPS,
+                        TRAIN_WEIGHTS_PATH,
                         VAL_FRACTION, WARMUP_STEPS)
 from src import checkpoint
 from src.data_loader import close_envs, make_data_splits
@@ -57,7 +58,7 @@ splits = make_data_splits(
 )
 training_data = splits.train
 
-steps_per_epoch = training_data.steps_per_epoch
+steps_per_epoch = STEPS_PER_EPOCH or training_data.steps_per_epoch
 n_steps = N_EPOCHS * steps_per_epoch
 
 print(f"Steps per epoch: {steps_per_epoch}")
@@ -192,8 +193,10 @@ grid_eval_fn = partial(
     + TIMESTEPS // (2 * EVAL_TIMESTEPS),
     num_classes=NUM_CLASSES,
 )
-mse_fn = grid_eval_fn(batches=splits.val)
-train_mse_fn = grid_eval_fn(batches=splits.train_probe, prefix="train_probe")
+mse_fn = grid_eval_fn(batches=splits.val[:EVAL_BATCHES])
+train_mse_fn = grid_eval_fn(
+    batches=splits.train_probe[:EVAL_BATCHES], prefix="train_probe"
+)
 
 print("Loading Inception and featurizing the validation images...")
 phase_start = time.perf_counter()
@@ -246,6 +249,7 @@ state, history = fit_model(
     train_ds=training_data.batches,
     steps_per_epoch=steps_per_epoch,
     n_epochs=N_EPOCHS,
+    print_every=PRINT_EVERY,
     figures_dir=str(FIGURES_DIR),
     history=resumed_history,
     checkpoint_fn=checkpoint_fn,
