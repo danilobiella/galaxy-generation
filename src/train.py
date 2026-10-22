@@ -11,7 +11,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import optax  # type: ignore
 
-from src.logs import format_epoch_summary, peak_memory
+from src.logs import (format_epoch_header, format_epoch_summary, format_run_start,
+                      format_step_line, peak_memory)
 
 if TYPE_CHECKING:
     from src.diffusion import DiffusionSchedule, Samplers
@@ -268,12 +269,7 @@ def train_epoch(
             win_loss = np.mean(epoch_metrics["loss"][last_idx:])
             win_grad = np.mean(epoch_metrics["grad_norm"][last_idx:])
 
-            print(
-                f"[Ep {epoch}/{n_epochs}][B {i}/{steps}] "
-                f"Loss: {win_loss:.4f} | "
-                f"Grad Norm: {win_grad:.2e} | "
-                f"LR: {lr:.2e}"
-            )
+            print(format_step_line(i, steps, win_loss, win_grad, lr))
             last_idx = len(epoch_metrics["loss"])
 
     return train_state, epoch_metrics, data_wait
@@ -313,11 +309,11 @@ def fit_model(
 
     start_epoch = start_step // steps_per_epoch + 1
 
-    print(f"\nStarting Training | Epochs: {n_epochs} | Batches: {steps_per_epoch}")
-    print("-" * 80)
+    print(format_run_start(n_epochs, steps_per_epoch))
 
     run_start = time.perf_counter()
     for epoch in range(start_epoch, n_epochs + 1):
+        print(format_epoch_header(epoch, n_epochs))
         start_time = time.perf_counter()
 
         train_state, epoch_data, data_wait = train_epoch(

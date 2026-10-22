@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 import sys
 
 import jax
@@ -9,7 +10,9 @@ import jax
 LOGGER_NAME = "galaxy"
 
 RESET = "\033[0m"
+BOLD = "\033[1m"
 DIM = "\033[2m"
+BLUE = "\033[34m"
 CYAN = "\033[36m"
 GREEN = "\033[32m"
 LEVEL_COLORS = {
@@ -31,6 +34,43 @@ def use_color() -> bool:
 
 def green(text: str) -> str:
     return f"{GREEN}{text}{RESET}" if use_color() else text
+
+
+ANSI = re.compile(r"\033\[[0-9;]*m")
+
+
+def paint(text: str, code: str, color: bool) -> str:
+    return f"{code}{text}{RESET}" if color else text
+
+
+def pad(text: str, width: int) -> str:
+    return text + " " * (width - len(ANSI.sub("", text)))
+
+
+def format_run_start(n_epochs: int, steps: int, color: bool | None = None) -> str:
+    color = use_color() if color is None else color
+    return "\n" + paint(f"Training: {n_epochs} epochs × {steps} steps", BOLD, color)
+
+
+def format_epoch_header(epoch: int, n_epochs: int, color: bool | None = None) -> str:
+    color = use_color() if color is None else color
+    title = f"── epoch {epoch}/{n_epochs} "
+    return paint(title + "─" * (RULE_WIDTH - len(title)), BOLD + CYAN, color)
+
+
+def format_step_line(
+    step: int, steps: int, loss: float, grad_norm: float, lr: float,
+    color: bool | None = None,
+) -> str:
+    color = use_color() if color is None else color
+    sep = paint(" | ", DIM, color)
+    return (
+        paint(f"{'step':<{LABEL_WIDTH}}", BLUE, color)
+        + f"{f'{step}/{steps}':<12}"
+        + f"loss {paint(f'{loss:.4f}', BOLD, color)}" + sep
+        + f"grad {grad_norm:.2e}" + sep
+        + f"lr {lr:.2e}"
+    )
 
 
 class ColorFormatter(logging.Formatter):
@@ -129,8 +169,8 @@ def format_epoch_summary(
 ) -> str:
     color = use_color() if color is None else color
 
-    def paint(text: str, code: str) -> str:
-        return f"{code}{text}{RESET}" if color else text
+    def number(value: float) -> str:
+        return paint(f"{value:.4f}", BOLD, color)
 
     def row(label: str, value: str, seconds: float | None = None, detail: str = "") -> list[str]:
         parts = []
@@ -139,35 +179,35 @@ def format_epoch_summary(
         if detail:
             parts.append(f"({detail})")
         timing = "  ".join(parts)
-        head = paint(f"{label:<{LABEL_WIDTH}}", DIM)
+        head = paint(f"{label:<{LABEL_WIDTH}}", BLUE, color)
         if not timing:
             return [head + value]
-        if len(value) > VALUE_WIDTH:
-            return [head + value, " " * (LABEL_WIDTH + VALUE_WIDTH) + paint(timing, DIM)]
-        return [head + f"{value:<{VALUE_WIDTH}}" + paint(timing, DIM)]
+        timing = paint(timing, DIM, color)
+        if len(ANSI.sub("", value)) > VALUE_WIDTH:
+            return [head + value, " " * (LABEL_WIDTH + VALUE_WIDTH) + timing]
+        return [head + pad(value, VALUE_WIDTH) + timing]
 
     r = record
 
     def has(*keys: str) -> bool:
         return all(k in r for k in keys)
 
-    title = f"── epoch {r['epoch']}/{n_epochs} "
-    lines = [paint(title + "─" * (RULE_WIDTH - len(title)), CYAN)]
-    lines += row(
-        "train", f"loss {r['train_loss']:.4f}", r["time_train"],
+    lines = row(
+        "train", f"loss {number(r['train_loss'])}", r["time_train"],
         f"data wait {format_duration(r['time_data_wait'])}",
     )
     if has("val_mse"):
-        lines += row("val", f"mse  {r['val_mse']:.4f}", r.get("time_val"))
+        lines += row("val", f"mse  {number(r['val_mse'])}", r.get("time_val"))
     if has("val_mse", "train_probe_mse"):
         lines += row(
-            "probe", f"mse  {r['train_probe_mse']:.4f} ",
+            "probe", f"mse  {number(r['train_probe_mse'])}",
             r.get("time_probe"),
         )
     if has("kid", "kid_std", "fid", "density", "coverage"):
+        kid, rest = format_scores(r).split(" | ", 1)
         lines += row(
             "quality",
-            format_scores(r),
+            paint(kid, BOLD, color) + " | " + rest,
             r.get("time_quality"),
             format_timings({
                 k.removeprefix("time_quality_"): v
@@ -177,7 +217,10 @@ def format_epoch_summary(
         )
     lines += row(
         "time",
-        f"epoch {format_duration(wall)} | elapsed {format_duration(elapsed)} | "
-        f"ETA {format_duration(eta)} | GPU {memory}",
+        paint(
+            f"epoch {format_duration(wall)} | elapsed {format_duration(elapsed)} | "
+            f"ETA {format_duration(eta)} | GPU {memory}",
+            DIM, color,
+        ),
     )
     return "\n".join(lines)
