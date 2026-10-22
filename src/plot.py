@@ -56,6 +56,11 @@ def plot_loss(history: dict, filepath: str = "loss_plot.png"):
     fig, ax = plt.subplots(figsize=(9, 4.5))
     ax.plot(table["train_loss"], linewidth=2, color="#eb6834", label="train (epoch mean)")
     ax.plot(table["val_mse"], linewidth=2, color="#2b2b2b", label="val (mean)")
+    if "train_probe_mse" in table:
+        ax.plot(
+            table["train_probe_mse"].dropna(), linewidth=2, marker="o", markersize=3,
+            color="#2a78d6", label="train probe (val t grid)",
+        )
     for key, color in zip(keys, colors):
         ax.plot(
             table[key], linestyle="--", linewidth=1,

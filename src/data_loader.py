@@ -141,11 +141,15 @@ class DataSplits:
     """A stratified train/validation split of one LMDB.
 
     `val` is finite, unshuffled and unaugmented, so every iteration yields the
-    same batches. `val_hash` fingerprints the validation indices.
+    same batches. `train_probe` is a fixed train subset of the same per-class
+    counts, built the same way, so its denoising MSE compares directly with
+    validation's.
+    `val_hash` fingerprints the validation indices.
     """
 
     train: TrainingData
     val: grain.MapDataset
+    train_probe: grain.MapDataset
     val_hash: str
     train_idx: np.ndarray
     train_labels: np.ndarray
@@ -185,6 +189,14 @@ def stratified_split(
         val.append(idx[:n_val])
         train.append(idx[n_val:])
     return np.sort(np.concatenate(train)), np.sort(np.concatenate(val))
+
+
+def class_matched(train_idx, train_labels, ref_labels, rng) -> np.ndarray:
+    picks = [
+        rng.choice(train_idx[train_labels == c], np.sum(ref_labels == c), replace=False)
+        for c in np.unique(ref_labels)
+    ]
+    return np.sort(np.concatenate(picks))
 
 
 def split_hash(val_indices: np.ndarray) -> str:
@@ -240,19 +252,36 @@ def make_data_splits(
     )
 
     val_order = np.random.default_rng(split_seed).permutation(val_idx)
-    process_fn = partial(process_features, image_size=image_size)
-    val = (
-        grain.MapDataset.source(GalaxyLMDBDataSource(db_path, val_order))
-        .map(process_fn)
-        .batch(batch_size=batch_size, drop_remainder=True)
-    )
+    val = _fixed_batches(db_path, val_order, batch_size, image_size)
     if len(val) == 0:
         raise ValueError(
             f"Validation split has {len(val_idx)} samples, fewer than one batch "
             f"of {batch_size}."
         )
 
-    return DataSplits(train, val, split_hash(val_idx), train_idx, labels[train_idx])
+    probe_rng = np.random.default_rng([split_seed, 1])
+    probe_order = probe_rng.permutation(
+        class_matched(train_idx, labels[train_idx], labels[val_idx], probe_rng)
+    )
+    train_probe = _fixed_batches(db_path, probe_order, batch_size, image_size)
+
+    return DataSplits(
+        train, val, train_probe, split_hash(val_idx), train_idx, labels[train_idx]
+    )
+
+
+def _fixed_batches(
+    db_path: str,
+    order: np.ndarray,
+    batch_size: int,
+    image_size: Optional[Tuple[int, int]],
+) -> grain.MapDataset:
+    process_fn = partial(process_features, image_size=image_size)
+    return (
+        grain.MapDataset.source(GalaxyLMDBDataSource(db_path, order))
+        .map(process_fn)
+        .batch(batch_size=batch_size, drop_remainder=True)
+    )
 
 
 def make_overfit_loader(

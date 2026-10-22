@@ -16,18 +16,10 @@ import numpy as np
 
 from src.config import (BATCH_SIZE, DATA_PATH, FID_SAMPLES, IMAGE_SIZE,
                         QUALITY_BASELINE_PATH, SPLIT_SEED, VAL_FRACTION)
-from src.data_loader import make_data_splits
+from src.data_loader import class_matched, make_data_splits
 from src.metrics import (Reference, format_scores, inception_features,
                          load_images, load_inception, quality_reference,
                          quality_scores)
-
-
-def class_matched(train_idx, train_labels, ref_labels, rng) -> np.ndarray:
-    picks = [
-        rng.choice(train_idx[train_labels == c], np.sum(ref_labels == c), replace=False)
-        for c in np.unique(ref_labels)
-    ]
-    return np.sort(np.concatenate(picks))
 
 
 def main() -> None:

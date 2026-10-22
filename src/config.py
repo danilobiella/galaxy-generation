@@ -74,7 +74,7 @@ API_STEPS = (20, 50)
 API_MAX_BATCH = 10
 
 BATCH_SIZE = 16
-N_EPOCHS = 2 if SMOKE else 50
+N_EPOCHS = 3 if SMOKE else 50
 MODEL_DIM = 16 if SMOKE else 64
 MODEL_DIM_MULTS = (1, 2, 4) if SMOKE else (1, 2, 4, 8)
 SEED = 42

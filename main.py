@@ -2,6 +2,7 @@ import pickle
 import shutil
 import sys
 import time
+from functools import partial
 
 import haiku as hk
 import jax
@@ -182,15 +183,17 @@ if resumed is not None:
 
 mse_key, fid_key = eval_keys(SPLIT_SEED)
 
-mse_fn = make_eval_fn(
+grid_eval_fn = partial(
+    make_eval_fn,
     unet=unet,
     schedule=diffusion_schedule,
-    val_batches=splits.val,
     key=mse_key,
     timesteps=np.arange(EVAL_TIMESTEPS) * (TIMESTEPS // EVAL_TIMESTEPS)
     + TIMESTEPS // (2 * EVAL_TIMESTEPS),
     num_classes=NUM_CLASSES,
 )
+mse_fn = grid_eval_fn(batches=splits.val)
+train_mse_fn = grid_eval_fn(batches=splits.train_probe, prefix="train_probe")
 
 print("Loading Inception and featurizing the validation images...")
 phase_start = time.perf_counter()
@@ -216,6 +219,13 @@ def eval_fn(epoch, train_state):
     metrics = mse_fn(epoch, train_state)
     print(f"[EPOCH {epoch}] val MSE eval took {format_duration(time.perf_counter() - mse_start)}")
     if epoch % FID_EVERY == 0 or epoch == N_EPOCHS:
+        probe_start = time.perf_counter()
+        metrics |= train_mse_fn(epoch, train_state)
+        print(f"[EPOCH {epoch}] train probe MSE eval took {format_duration(time.perf_counter() - probe_start)}")
+        print(
+            f"[EPOCH {epoch}] train probe MSE: {metrics['train_probe_mse']:.4f} "
+            f"vs val {metrics['val_mse']:.4f}"
+        )
         metrics |= quality_fn(epoch, train_state)
     return metrics
 

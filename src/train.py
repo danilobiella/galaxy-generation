@@ -187,10 +187,11 @@ def make_train_fns(
 def make_eval_fn(
     unet: hk.Transformed,
     schedule: DiffusionSchedule,
-    val_batches,
+    batches,
     key: jax.Array,
     timesteps,
     num_classes: int | None = None,
+    prefix: str = "val",
 ):
     ts = jnp.asarray(timesteps, dtype=jnp.int32)
     n_t = ts.shape[0]
@@ -209,12 +210,12 @@ def make_eval_fn(
         params = train_state.model_state.params
         per_batch = [
             eval_batch(params, x, y, jax.random.fold_in(key, i))
-            for i, (x, y) in enumerate(val_batches)
+            for i, (x, y) in enumerate(batches)
         ]
         per_t = np.mean(jax.device_get(per_batch), axis=0)
-        metrics = {"val_mse": float(per_t.mean())}
+        metrics = {f"{prefix}_mse": float(per_t.mean())}
         metrics.update(
-            {f"val_mse_t{int(t)}": float(v) for t, v in zip(timesteps, per_t)}
+            {f"{prefix}_mse_t{int(t)}": float(v) for t, v in zip(timesteps, per_t)}
         )
         return metrics
 
@@ -356,7 +357,7 @@ def fit_model(
             if "val_mse" in val_metrics:
                 val_msg = (
                     f" | Val MSE: {val_metrics['val_mse']:.4f} "
-                    f"({format_duration(time.time() - eval_start)})"
+                    f"| Eval: {format_duration(time.time() - eval_start)}"
                 )
         history.setdefault("epochs", []).append(record)
 

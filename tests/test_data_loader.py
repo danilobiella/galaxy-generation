@@ -331,6 +331,25 @@ class TestDataSplits:
         assert all(np.array_equal(a, b) for a, b in zip(first, second, strict=True))
         assert {marker_corner(img) for img in np.concatenate(first)} == {(0, 0)}
 
+    def test_train_probe_is_fixed_train_data_matching_val_classes(self, make_lmdb):
+        db = make_lmdb(100)
+        splits = make_data_splits(db, batch_size=4, val_fraction=0.2)
+        first = [(np.asarray(x), np.asarray(y)) for x, y in splits.train_probe]
+        second = [np.asarray(x) for x, _ in splits.train_probe]
+        assert all(np.array_equal(a, b) for (a, _), b in zip(first, second, strict=True))
+        probe_images = np.concatenate([x for x, _ in first])
+        probe_labels = np.concatenate([y for _, y in first])
+        val_labels = np.concatenate([np.asarray(y) for _, y in splits.val])
+        assert np.bincount(probe_labels, minlength=NUM_CLASSES).tolist() == (
+            np.bincount(val_labels, minlength=NUM_CLASSES).tolist()
+        )
+        assert {sample_id(img) for img in probe_images} <= set(splits.train_idx.tolist())
+        assert {marker_corner(img) for img in probe_images} == {(0, 0)}
+
+    def test_train_probe_refuses_a_train_split_smaller_than_val(self, make_lmdb):
+        with pytest.raises(ValueError):
+            make_data_splits(make_lmdb(100), batch_size=4, val_fraction=0.6)
+
     def test_train_never_sees_val_samples(self, make_lmdb):
         splits = make_data_splits(make_lmdb(100), batch_size=4, val_fraction=0.2)
         val_ids = {sample_id(img) for x, _ in splits.val for img in np.asarray(x)}
