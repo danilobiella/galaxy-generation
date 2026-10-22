@@ -19,10 +19,10 @@ from src.config import (BATCH_SIZE, DATA_PATH, FID_BATCH_SIZE, FID_SAMPLES,
                         VAL_FRACTION, WEIGHTS_PATH)
 from src.data_loader import make_data_splits
 from src.generate import Generator
-from src.logs import green
-from src.metrics import (Reference, eval_keys, format_scores, format_timings,
-                         inception_features, load_baseline, load_inception,
-                         quality_reference, score_samples)
+from src.logs import format_scores, format_timings, green
+from src.metrics import (Reference, eval_keys, inception_features,
+                         load_baseline, load_inception, quality_reference,
+                         score_samples)
 
 
 def main() -> None:

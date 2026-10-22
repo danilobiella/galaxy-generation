@@ -17,9 +17,9 @@ import numpy as np
 from src.config import (BATCH_SIZE, DATA_PATH, FID_SAMPLES, IMAGE_SIZE,
                         QUALITY_BASELINE_PATH, SPLIT_SEED, VAL_FRACTION)
 from src.data_loader import class_matched, make_data_splits
-from src.metrics import (Reference, format_scores, inception_features,
-                         load_images, load_inception, quality_reference,
-                         quality_scores)
+from src.logs import format_scores
+from src.metrics import (Reference, inception_features, load_images,
+                         load_inception, quality_reference, quality_scores)
 
 
 def main() -> None:

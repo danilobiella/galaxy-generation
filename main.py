@@ -214,19 +214,17 @@ print(
 )
 
 
+def timed(name, fn, epoch, train_state):
+    start = time.perf_counter()
+    metrics = fn(epoch, train_state)
+    return metrics | {f"time_{name}": time.perf_counter() - start}
+
+
 def eval_fn(epoch, train_state):
-    mse_start = time.perf_counter()
-    metrics = mse_fn(epoch, train_state)
-    print(f"[EPOCH {epoch}] val MSE eval took {format_duration(time.perf_counter() - mse_start)}")
+    metrics = timed("val", mse_fn, epoch, train_state)
     if epoch % FID_EVERY == 0 or epoch == N_EPOCHS:
-        probe_start = time.perf_counter()
-        metrics |= train_mse_fn(epoch, train_state)
-        print(f"[EPOCH {epoch}] train probe MSE eval took {format_duration(time.perf_counter() - probe_start)}")
-        print(
-            f"[EPOCH {epoch}] train probe MSE: {metrics['train_probe_mse']:.4f} "
-            f"vs val {metrics['val_mse']:.4f}"
-        )
-        metrics |= quality_fn(epoch, train_state)
+        metrics |= timed("probe", train_mse_fn, epoch, train_state)
+        metrics |= timed("quality", quality_fn, epoch, train_state)
     return metrics
 
 

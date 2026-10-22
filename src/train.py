@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import optax  # type: ignore
 
-from src.logs import format_duration, peak_memory
+from src.logs import format_epoch_summary, peak_memory
 
 if TYPE_CHECKING:
     from src.diffusion import DiffusionSchedule, Samplers
@@ -87,7 +87,6 @@ def make_model_fns(
         plt.tight_layout()
         plt.savefig(filepath, bbox_inches="tight")
         plt.close(fig)
-        print(f"Generated samples saved to: {filepath}")
 
     return init_model_state, generate_and_save_images
 
@@ -277,8 +276,7 @@ def train_epoch(
             )
             last_idx = len(epoch_metrics["loss"])
 
-    print(f"[Ep {epoch}/{n_epochs}] waited {format_duration(data_wait)} for data")
-    return train_state, epoch_metrics
+    return train_state, epoch_metrics, data_wait
 
 
 def fit_model(
@@ -318,11 +316,11 @@ def fit_model(
     print(f"\nStarting Training | Epochs: {n_epochs} | Batches: {steps_per_epoch}")
     print("-" * 80)
 
-    run_start = time.time()
+    run_start = time.perf_counter()
     for epoch in range(start_epoch, n_epochs + 1):
-        start_time = time.time()
+        start_time = time.perf_counter()
 
-        train_state, epoch_data = train_epoch(
+        train_state, epoch_data, data_wait = train_epoch(
             base_key=train_key,
             train_state=train_state,
             train_step_fn=train_step_fn,
@@ -337,7 +335,7 @@ def fit_model(
         for key_name, values in epoch_data.items():
             history.setdefault(key_name, []).extend(values)
 
-        epoch_time = time.time() - start_time
+        epoch_time = time.perf_counter() - start_time
 
         os.makedirs(figures_dir, exist_ok=True)
         gen_fn(
@@ -346,36 +344,23 @@ def fit_model(
             filepath=f"{figures_dir}/epoch_{epoch}.png",
         )
 
-        avg_loss = float(np.mean(epoch_data["loss"]))
-        record = {"epoch": epoch, "train_loss": avg_loss}
-
-        val_msg = ""
+        record = {
+            "epoch": epoch,
+            "train_loss": float(np.mean(epoch_data["loss"])),
+            "time_train": epoch_time,
+            "time_data_wait": data_wait,
+        }
         if eval_fn is not None:
-            eval_start = time.time()
-            val_metrics = eval_fn(epoch, train_state)
-            record.update(val_metrics)
-            if "val_mse" in val_metrics:
-                val_msg = (
-                    f" | Val MSE: {val_metrics['val_mse']:.4f} "
-                    f"| Eval: {format_duration(time.time() - eval_start)}"
-                )
+            record.update(eval_fn(epoch, train_state))
         history.setdefault("epochs", []).append(record)
-
-        print(
-            f"[EPOCH {epoch}] COMPLETED | Time: {epoch_time:.1f}s | "
-            f"AVG Loss: {avg_loss:.4f}{val_msg}"
-        )
 
         if checkpoint_fn is not None:
             checkpoint_fn(epoch, train_state, history, epoch == n_epochs)
 
-        elapsed = time.time() - run_start
+        elapsed = time.perf_counter() - run_start
         eta = elapsed / (epoch - start_epoch + 1) * (n_epochs - epoch)
-        print(
-            f"[EPOCH {epoch}] wall {format_duration(time.time() - start_time)} | "
-            f"elapsed {format_duration(elapsed)} | ETA {format_duration(eta)} | "
-            f"peak GPU memory {peak_memory()}"
-        )
-        print("-" * 80)
+        print(format_epoch_summary(
+            record, n_epochs, time.perf_counter() - start_time, elapsed, eta, peak_memory()
+        ))
 
     return train_state, history

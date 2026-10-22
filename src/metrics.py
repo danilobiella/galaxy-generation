@@ -22,7 +22,6 @@ from src.config import (INCEPTION_WEIGHTS_PATH, INCEPTION_WEIGHTS_SHA256,
 from src.data_loader import DataSplits, GalaxyLMDBDataSource, resize_image
 from src.download import download, sha256_of
 from src.generate import sample_batched, to_uint8
-from src.logs import format_duration
 
 
 def load_baseline(val_hash: str | None = None) -> dict | None:
@@ -168,14 +167,6 @@ def quality_scores(feats: np.ndarray, ref: Reference, seed: int = 0) -> dict[str
     }
 
 
-def format_scores(scores: dict[str, float]) -> str:
-    return (
-        f"KID {scores['kid'] * 1e3:.2f} ± {scores['kid_std'] * 1e3:.2f} ×10⁻³ | "
-        f"FID {scores['fid']:.2f} | "
-        f"density {scores['density']:.3f} | coverage {scores['coverage']:.3f}"
-    )
-
-
 def load_images(
     db_path: str, indices: np.ndarray, image_size: tuple[int, int]
 ) -> np.ndarray:
@@ -232,10 +223,6 @@ def score_samples(
     return scores, timings
 
 
-def format_timings(timings: dict[str, float]) -> str:
-    return ", ".join(f"{k} {format_duration(v)}" for k, v in timings.items())
-
-
 def make_sample_quality_fn(
     samplers,
     inception: fidjax.FID,
@@ -258,7 +245,6 @@ def make_sample_quality_fn(
             samplers, train_state.ema_params, inception, ref, key,
             len(real_images), real_labels, steps, guidance, batch_size,
         )
-        print(f"[EPOCH {epoch}] {format_scores(scores)} | {format_timings(timings)}")
-        return scores
+        return scores | {f"time_quality_{k}": v for k, v in timings.items()}
 
     return quality_fn

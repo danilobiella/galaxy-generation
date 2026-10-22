@@ -236,7 +236,7 @@ class TestEmaUpdate:
 class TestTrainEpoch:
     def test_consumes_every_batch(self, net, sched, batch):
         state, step_fn = make_trainer(net, sched)
-        state, metrics = train_epoch(
+        state, metrics, _ = train_epoch(
             jax.random.key(0), state, step_fn, iter([batch] * 4), 4, 1, 1, lambda s: 1e-4
         )
         assert len(metrics["loss"]) == 4
@@ -246,7 +246,7 @@ class TestTrainEpoch:
         """A (images, labels) batch must reach the step as a label, not be eaten."""
         state, step_fn = make_trainer(net, sched, num_classes=NUM_CLASSES, p_uncond=0.0)
         labels = jnp.array([0, 1, 1, 1], jnp.int32)
-        after, _ = train_epoch(
+        after, _, _ = train_epoch(
             jax.random.key(0),
             state,
             step_fn,
@@ -290,7 +290,7 @@ class TestTrainEpoch:
 
     def test_collects_all_three_metrics(self, net, sched, batch):
         state, step_fn = make_trainer(net, sched)
-        _, metrics = train_epoch(
+        _, metrics, _ = train_epoch(
             jax.random.key(0), state, step_fn, iter([batch] * 2), 2, 1, 1, lambda s: 1e-4
         )
         assert set(metrics) == {"loss", "grad_norm", "param_norm"}

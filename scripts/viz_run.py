@@ -9,9 +9,7 @@ Usage:
 """
 
 import argparse
-import json
 import pickle
-import re
 from pathlib import Path
 
 import matplotlib
@@ -29,9 +27,6 @@ from src.plot import (WINDOW, plot_gradients, plot_loss,  # noqa: E402
 
 DEFAULT_RUN_DIR = RUNS_DIR
 DIFFUSION_KEYS = {"loss", "grad_norm", "param_norm", "epochs"}
-EPOCH_LINE = re.compile(
-    r"\[EPOCH (\d+)\] COMPLETED \| Time: ([\d.]+)s \| AVG Loss: ([\d.]+)"
-)
 
 
 def load_history(run_dir: Path) -> dict:
@@ -51,27 +46,6 @@ def load_history(run_dir: Path) -> dict:
     return history
 
 
-def epoch_times(run_dir: Path) -> list[float]:
-    """Per-epoch wall times, scraped from the Kaggle log if one is present."""
-    log = next(iter(run_dir.glob("*.log")), None)
-    if log is None:
-        return []
-
-    try:
-        events = json.loads(log.read_text())
-    except (json.JSONDecodeError, UnicodeDecodeError, OSError):
-        return []
-
-    times = []
-    for event in events:
-        if not isinstance(event, dict):
-            continue
-        match = EPOCH_LINE.search(event.get("data", ""))
-        if match:
-            times.append(float(match.group(2)))
-    return times
-
-
 def summarize(history: dict, run_dir: Path) -> None:
     loss = np.asarray(history["loss"])
     tail = loss[-WINDOW:]
@@ -85,7 +59,7 @@ def summarize(history: dict, run_dir: Path) -> None:
         f" -> {history['param_norm'][-1]:.2f}"
     )
 
-    times = epoch_times(run_dir)
+    times = [record["time_train"] for record in history["epochs"]]
     if times:
         print(
             f"  epochs         : {len(times)} @ {np.mean(times):.0f}s avg"

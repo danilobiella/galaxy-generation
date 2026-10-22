@@ -90,6 +90,18 @@ def format_duration(seconds: float) -> str:
     return f"{seconds / 86400:.1f} d"
 
 
+def format_scores(scores: dict[str, float]) -> str:
+    return (
+        f"KID {scores['kid'] * 1e3:.2f} ± {scores['kid_std'] * 1e3:.2f} ×10⁻³ | "
+        f"FID {scores['fid']:.2f} | "
+        f"density {scores['density']:.3f} | coverage {scores['coverage']:.3f}"
+    )
+
+
+def format_timings(timings: dict[str, float]) -> str:
+    return ", ".join(f"{k} {format_duration(v)}" for k, v in timings.items())
+
+
 def peak_memory() -> str:
     parts = []
     for d in jax.local_devices():
@@ -99,3 +111,74 @@ def peak_memory() -> str:
             limit = stats.get("bytes_limit", 0) / 2**30
             parts.append(f"{d.id}: {used:.1f}/{limit:.1f} GB")
     return ", ".join(parts) or "n/a"
+
+
+LABEL_WIDTH = 9
+VALUE_WIDTH = 46
+RULE_WIDTH = 72
+
+
+def format_epoch_summary(
+    record: dict,
+    n_epochs: int,
+    wall: float,
+    elapsed: float,
+    eta: float,
+    memory: str,
+    color: bool | None = None,
+) -> str:
+    color = use_color() if color is None else color
+
+    def paint(text: str, code: str) -> str:
+        return f"{code}{text}{RESET}" if color else text
+
+    def row(label: str, value: str, seconds: float | None = None, detail: str = "") -> list[str]:
+        parts = []
+        if seconds is not None:
+            parts.append(format_duration(seconds))
+        if detail:
+            parts.append(f"({detail})")
+        timing = "  ".join(parts)
+        head = paint(f"{label:<{LABEL_WIDTH}}", DIM)
+        if not timing:
+            return [head + value]
+        if len(value) > VALUE_WIDTH:
+            return [head + value, " " * (LABEL_WIDTH + VALUE_WIDTH) + paint(timing, DIM)]
+        return [head + f"{value:<{VALUE_WIDTH}}" + paint(timing, DIM)]
+
+    r = record
+
+    def has(*keys: str) -> bool:
+        return all(k in r for k in keys)
+
+    title = f"── epoch {r['epoch']}/{n_epochs} "
+    lines = [paint(title + "─" * (RULE_WIDTH - len(title)), CYAN)]
+    lines += row(
+        "train", f"loss {r['train_loss']:.4f}", r["time_train"],
+        f"data wait {format_duration(r['time_data_wait'])}",
+    )
+    if has("val_mse"):
+        lines += row("val", f"mse  {r['val_mse']:.4f}", r.get("time_val"))
+    if has("val_mse", "train_probe_mse"):
+        gap = r["val_mse"] - r["train_probe_mse"]
+        lines += row(
+            "probe", f"mse  {r['train_probe_mse']:.4f} ",
+            r.get("time_probe"),
+        )
+    if has("kid", "kid_std", "fid", "density", "coverage"):
+        lines += row(
+            "quality",
+            format_scores(r),
+            r.get("time_quality"),
+            format_timings({
+                k.removeprefix("time_quality_"): v
+                for k, v in r.items()
+                if k.startswith("time_quality_")
+            }),
+        )
+    lines += row(
+        "time",
+        f"epoch {format_duration(wall)} | elapsed {format_duration(elapsed)} | "
+        f"ETA {format_duration(eta)} | GPU {memory}",
+    )
+    return "\n".join(lines)
